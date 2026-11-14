@@ -23,6 +23,24 @@ Git, Python 3.12+, Node.js LTS, Docker Desktop.
 
 Use three terminals. Commands are for Windows PowerShell; macOS/Linux equivalents are noted.
 
+### Run the full stack with Docker
+
+From the repository root, build and start the API, frontend, PostgreSQL/pgvector, and Redis:
+
+```powershell
+docker compose up --build
+```
+
+In a second terminal, apply the database migration:
+
+```powershell
+docker compose exec backend alembic upgrade head
+```
+
+This applies the pgvector extension migration and creates the initial `organizations`, `users`, and `organization_members` tables. To create a migration after changing SQLAlchemy models, run `docker compose exec backend alembic revision --autogenerate -m "describe the schema change"`, review the generated file under `backend/alembic/versions/`, then apply it with `docker compose exec backend alembic upgrade head`. Do not edit migrations that have already been applied.
+
+Open http://localhost:5173. The API docs are at http://localhost:8000/docs. Stop the stack with `Ctrl+C`; run `docker compose down` to stop and remove the containers.
+
 ### 1. Infrastructure (Postgres + pgvector, Redis)
 
 ```powershell

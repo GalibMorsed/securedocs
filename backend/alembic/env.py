@@ -5,9 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.core.database import Base
-
-# Import model modules here as they are added so autogenerate can see them:
-# from app.models import user, organization, document, chunk  # noqa: F401
+from app import models  # noqa: F401  Import models so Alembic can see their tables.
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
