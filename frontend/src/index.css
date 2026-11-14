@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --color-paper: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-ink: #17202b;
+  --color-muted: #5b6676;
+  --color-line: #dde2e9;
+  --color-accent: #1f4e8c;
+  --color-ok: #1b7a57;
+  --color-fail: #b42318;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

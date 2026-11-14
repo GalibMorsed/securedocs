@@ -1,0 +1,39 @@
+# SecureDocs - local development infrastructure.
+# FastAPI and React run on the host; Postgres (+pgvector) and Redis run here.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: securedocs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-securedocs}
+      POSTGRES_USER: ${POSTGRES_USER:-securedocs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-securedocs_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-securedocs} -d ${POSTGRES_DB:-securedocs}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: securedocs-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:
