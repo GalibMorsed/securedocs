@@ -2,8 +2,8 @@
 
 Secure enterprise document management and AI-powered knowledge retrieval using RAG.
 
-**Current status: Phase 1 - local development foundation.**
-React + FastAPI + PostgreSQL (pgvector) + Redis, with a status page that proves every piece is connected.
+**Current status: Authentication foundation.**
+React + FastAPI + PostgreSQL (pgvector) + Redis, with account registration, bearer-token authentication, protected workspace routes, and service diagnostics.
 
 ## Stack
 
@@ -40,6 +40,18 @@ docker compose exec backend alembic upgrade head
 This applies the pgvector extension migration and creates the initial `organizations`, `users`, and `organization_members` tables. To create a migration after changing SQLAlchemy models, run `docker compose exec backend alembic revision --autogenerate -m "describe the schema change"`, review the generated file under `backend/alembic/versions/`, then apply it with `docker compose exec backend alembic upgrade head`. Do not edit migrations that have already been applied.
 
 Open http://localhost:5173. The API docs are at http://localhost:8000/docs. Stop the stack with `Ctrl+C`; run `docker compose down` to stop and remove the containers.
+
+For non-development deployments, set a unique `JWT_SECRET_KEY` of at least 48 characters and set `ENVIRONMENT` to `staging` or `production`. Generate a secret with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Access tokens expire after 60 minutes by default; the frontend keeps the token in tab-scoped `sessionStorage` and clears it when signing out.
+
+### Authentication API
+
+- `POST /api/v1/auth/register` accepts `email`, `password` (12–128 characters), `full_name`, and `organization_name`. It creates the user, organization, and owner membership, then returns a bearer token and user profile.
+- `POST /api/v1/auth/login` accepts `email` and `password` and returns a bearer token and user profile.
+- `GET /api/v1/auth/me` returns the current user and requires `Authorization: Bearer <access_token>`.
+
+In Swagger at http://localhost:8000/docs, register or log in first, copy `access_token`, choose **Authorize**, and paste the token value to try `/auth/me` (Swagger adds the `Bearer` prefix).
+
+Frontend routes: `/` redirects to login (or the dashboard for an existing session), `/login` and `/register` are guest pages, `/dashboard` and `/documents` require a valid session, and `/status` remains available for service diagnostics.
 
 ### 1. Infrastructure (Postgres + pgvector, Redis)
 

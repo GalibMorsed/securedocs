@@ -35,9 +35,12 @@ services:
     build:
       context: ./backend
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-securedocs}:${POSTGRES_PASSWORD:-securedocs_password}@postgres:5432/${POSTGRES_DB:-securedocs}
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: '["http://localhost:5173"]'
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-development-only-change-this-secret-before-deploying}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
     ports:
       - "8000:8000"
     depends_on:
