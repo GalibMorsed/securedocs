@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
-import { createDocument, deleteDocument, listDocuments } from "../api/documents";
-import type { DocumentPayload, DocumentRecord, DocumentStatus } from "../types/documents";
+import {
+  deleteDocument,
+  downloadDocument,
+  listDocuments,
+  MAX_UPLOAD_BYTES,
+  uploadDocument,
+  validateSelectedFile,
+} from "../api/documents";
+import type { DocumentRecord, DocumentStatus } from "../types/documents";
 
 const statusStyles: Record<DocumentStatus, string> = {
   uploaded: "bg-blue-50 text-blue-700",
@@ -16,13 +23,15 @@ export function DocumentsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [name, setName] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [description, setDescription] = useState("");
-  const [mimeType, setMimeType] = useState("");
-  const [fileSize, setFileSize] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadFailed, setUploadFailed] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -36,34 +45,53 @@ export function DocumentsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function handleFileChange(file: File | null) {
     setActionError(null);
-    setSaving(true);
+    setUploadFailed(false);
+    setUploadProgress(0);
+    setSelectedFile(file);
+    setFileError(file ? validateSelectedFile(file) : null);
+  }
 
-    const payload: DocumentPayload = {
-      name: name.trim(),
-      description: description.trim() || null,
-      mime_type: mimeType.trim() || null,
-      file_size: fileSize === "" ? null : Number(fileSize),
-    };
-
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedFile || fileError || uploading) return;
+    setActionError(null);
+    setUploading(true);
+    setUploadFailed(false);
+    setUploadProgress(0);
     try {
-      const created = await createDocument(payload);
-      setDocuments((current) => [created, ...current]);
-      setFormOpen(false);
-      setName("");
+      const uploaded = await uploadDocument(selectedFile, description, setUploadProgress);
+      setDocuments((current) => [uploaded, ...current]);
+      setSelectedFile(null);
       setDescription("");
-      setMimeType("");
-      setFileSize("");
+      setUploadProgress(100);
+      if (fileInput.current) fileInput.current.value = "";
     } catch (error) {
-      setActionError(error instanceof ApiError ? error.message : "Could not create the document.");
+      setActionError(error instanceof Error ? error.message : "Upload failed. Please retry.");
+      setUploadFailed(true);
     } finally {
-      setSaving(false);
+      setUploading(false);
+    }
+  }
+
+  async function handleDownload(document: DocumentRecord) {
+    setActionError(null);
+    setDownloadingId(document.id);
+    try {
+      const blob = await downloadDocument(document.id);
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = url;
+      anchor.download = document.name;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not download this document.");
+    } finally {
+      setDownloadingId(null);
     }
   }
 
@@ -86,153 +114,71 @@ export function DocumentsPage() {
         <div>
           <p className="text-sm font-semibold text-accent">LIBRARY</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">Documents</h1>
-          <p className="mt-2 max-w-2xl text-muted">Manage document details in your organization’s private library.</p>
+          <p className="mt-2 max-w-2xl text-muted">Secure files for your organization, ready to download whenever you need them.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setActionError(null);
-            setFormOpen((open) => !open);
-          }}
-          className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:brightness-110"
-        >
-          {formOpen ? "Cancel" : "+ Add document"}
-        </button>
       </div>
 
-      {actionError && (
-        <p className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-fail" role="alert">
-          {actionError}
-        </p>
-      )}
+      {actionError && <p className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-fail" role="alert">{actionError}</p>}
 
-      {formOpen && (
-        <section className="mt-7 rounded-xl border border-line bg-white p-5 shadow-sm sm:p-7" aria-labelledby="new-document-heading">
-          <h2 id="new-document-heading" className="text-lg font-semibold">Add document details</h2>
-          <p className="mt-1 text-sm text-muted">This creates a metadata record. File upload and storage will be added separately.</p>
-          <form onSubmit={handleCreate} className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="md:col-span-2">
-              <label htmlFor="document-name" className="mb-2 block text-sm font-medium">Name</label>
-              <input
-                id="document-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-                maxLength={255}
-                placeholder="e.g. Employee handbook"
-                className="w-full rounded-lg border border-line px-3.5 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-blue-100"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label htmlFor="document-description" className="mb-2 block text-sm font-medium">Description <span className="font-normal text-muted">(optional)</span></label>
-              <textarea
-                id="document-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                rows={3}
-                maxLength={10_000}
-                placeholder="What should teammates know about this document?"
-                className="w-full resize-y rounded-lg border border-line px-3.5 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-blue-100"
-              />
-            </div>
-            <div>
-              <label htmlFor="document-mime" className="mb-2 block text-sm font-medium">MIME type <span className="font-normal text-muted">(optional)</span></label>
-              <input
-                id="document-mime"
-                value={mimeType}
-                onChange={(event) => setMimeType(event.target.value)}
-                maxLength={255}
-                placeholder="application/pdf"
-                className="w-full rounded-lg border border-line px-3.5 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-blue-100"
-              />
-            </div>
-            <div>
-              <label htmlFor="document-size" className="mb-2 block text-sm font-medium">File size in bytes <span className="font-normal text-muted">(optional)</span></label>
-              <input
-                id="document-size"
-                type="number"
-                min={0}
-                step={1}
-                value={fileSize}
-                onChange={(event) => setFileSize(event.target.value)}
-                placeholder="0"
-                className="w-full rounded-lg border border-line px-3.5 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-blue-100"
-              />
-            </div>
-            <div className="flex justify-end md:col-span-2">
-              <button type="submit" disabled={saving || !name.trim()} className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-wait disabled:opacity-60">
-                {saving ? "Saving…" : "Create document"}
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      <section className="mt-8" aria-label="Organization documents">
-        {loading ? (
-          <div className="rounded-xl border border-line bg-white p-8 text-center text-sm text-muted" role="status">
-            Loading documents…
+      <section className="mt-7 rounded-xl border border-line bg-white p-5 shadow-sm sm:p-7" aria-labelledby="upload-document-heading">
+        <h2 id="upload-document-heading" className="text-lg font-semibold">Upload a document</h2>
+        <p className="mt-1 text-sm text-muted">PDF, plain text, or DOCX up to {formatBytes(MAX_UPLOAD_BYTES)}.</p>
+        <form onSubmit={handleUpload} className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+          <div>
+            <label htmlFor="document-file" className="mb-2 block text-sm font-medium">File</label>
+            <input
+              ref={fileInput}
+              id="document-file"
+              type="file"
+              accept=".pdf,.txt,.docx,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              disabled={uploading}
+              onChange={(event) => handleFileChange(event.target.files?.[0] ?? null)}
+              className="block w-full rounded-lg border border-line px-3 py-2.5 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:font-medium file:text-accent"
+              aria-describedby={fileError ? "document-file-error" : "document-file-help"}
+            />
+            <p id="document-file-help" className="mt-1.5 text-xs text-muted">{selectedFile ? `${selectedFile.name} · ${formatBytes(selectedFile.size)}` : "Choose a supported file."}</p>
+            {fileError && <p id="document-file-error" className="mt-1.5 text-sm text-fail" role="alert">{fileError}</p>}
           </div>
-        ) : loadError ? (
-          <div className="rounded-xl border border-red-200 bg-white p-8 text-center">
-            <p className="text-sm text-fail" role="alert">{loadError}</p>
-            <button type="button" onClick={() => void refresh()} className="mt-4 rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-slate-50">
-              Try again
-            </button>
+          <div>
+            <label htmlFor="document-description" className="mb-2 block text-sm font-medium">Description <span className="font-normal text-muted">(optional)</span></label>
+            <input
+              id="document-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              maxLength={10_000}
+              disabled={uploading}
+              placeholder="What is this document about?"
+              className="w-full rounded-lg border border-line px-3.5 py-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-blue-100"
+            />
           </div>
-        ) : documents.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center sm:px-12">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-xl text-accent" aria-hidden="true">▤</div>
-            <h2 className="mt-5 text-lg font-semibold">Your library is empty</h2>
-            <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted">
-              Create a metadata record to start organizing your team’s documents. File upload and storage are not enabled yet.
-            </p>
-            <button type="button" onClick={() => setFormOpen(true)} className="mt-6 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110">
-              Add your first document
-            </button>
+          <button type="submit" disabled={!selectedFile || Boolean(fileError) || uploading} className="rounded-lg bg-accent px-5 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60">
+            {uploading ? "Uploading…" : uploadFailed ? "Retry upload" : "Upload file"}
+          </button>
+        </form>
+        {uploading && (
+          <div className="mt-4" role="status" aria-live="polite">
+            <div className="mb-1 flex justify-between text-xs text-muted"><span>Uploading {selectedFile?.name}</span><span>{uploadProgress}%</span></div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-label="Upload progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploadProgress}>
+              <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${uploadProgress}%` }} />
+            </div>
           </div>
-        ) : (
-          <ul className="overflow-hidden rounded-xl border border-line bg-white shadow-sm">
-            {documents.map((document) => (
-              <li key={document.id} className="flex flex-col gap-4 border-b border-line p-5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                <div className="flex min-w-0 items-start gap-4">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-accent" aria-hidden="true">▤</div>
-                  <div className="min-w-0">
-                    <h2 className="truncate font-semibold">{document.name}</h2>
-                    {document.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{document.description}</p>}
-                    <p className="mt-2 text-xs text-muted">
-                      {document.mime_type ?? "Metadata only"}
-                      {document.file_size !== null && ` · ${formatBytes(document.file_size)}`}
-                      {` · ${document.versions.length} ${document.versions.length === 1 ? "version" : "versions"}`}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end">
-                  <div className="text-right">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusStyles[document.status]}`}>
-                      {document.status}
-                    </span>
-                    <p className="mt-1 text-xs text-muted">Updated {formatDate(document.updated_at)}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(document)}
-                    disabled={deletingId === document.id}
-                    aria-label={`Delete ${document.name}`}
-                    className="rounded-md border border-line px-3 py-2 text-sm font-medium text-fail hover:bg-red-50 disabled:opacity-60"
-                  >
-                    {deletingId === document.id ? "Deleting…" : "Delete"}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
         )}
       </section>
 
-      <p className="mt-6 text-sm text-muted">
-        Need to check your local services? <Link className="font-medium text-accent hover:underline" to="/status">Open system status</Link>
-      </p>
+      <section className="mt-8" aria-label="Organization documents">
+        {loading ? <div className="rounded-xl border border-line bg-white p-8 text-center text-sm text-muted" role="status">Loading documents…</div>
+          : loadError ? <div className="rounded-xl border border-red-200 bg-white p-8 text-center"><p className="text-sm text-fail" role="alert">{loadError}</p><button type="button" onClick={() => void refresh()} className="mt-4 rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-slate-50">Try again</button></div>
+            : documents.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center sm:px-12"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-xl text-accent" aria-hidden="true">▤</div><h2 className="mt-5 text-lg font-semibold">Your library is empty</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted">Upload a document to start building your organization’s private library.</p></div>
+              : <ul className="overflow-hidden rounded-xl border border-line bg-white shadow-sm">
+                {documents.map((document) => (
+                  <li key={document.id} className="flex flex-col gap-4 border-b border-line p-5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                    <div className="flex min-w-0 items-start gap-4"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-accent" aria-hidden="true">▤</div><div className="min-w-0"><h2 className="truncate font-semibold">{document.name}</h2>{document.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{document.description}</p>}<p className="mt-2 text-xs text-muted">{document.mime_type ?? "Metadata only"}{document.file_size !== null && ` · ${formatBytes(document.file_size)}`}{` · ${document.versions.length} ${document.versions.length === 1 ? "version" : "versions"}`}</p></div></div>
+                    <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end"><div className="text-right"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusStyles[document.status]}`}>{document.status}</span><p className="mt-1 text-xs text-muted">Updated {formatDate(document.updated_at)}</p></div>{document.has_file && <button type="button" onClick={() => void handleDownload(document)} disabled={downloadingId === document.id} aria-label={`Download ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-accent hover:bg-blue-50 disabled:opacity-60">{downloadingId === document.id ? "Downloading…" : "Download"}</button>}<button type="button" onClick={() => void handleDelete(document)} disabled={deletingId === document.id} aria-label={`Delete ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-fail hover:bg-red-50 disabled:opacity-60">{deletingId === document.id ? "Deleting…" : "Delete"}</button></div>
+                  </li>
+                ))}
+              </ul>}
+      </section>
+      <p className="mt-6 text-sm text-muted">Need to check your local services? <Link className="font-medium text-accent hover:underline" to="/status">Open system status</Link></p>
     </main>
   );
 }
@@ -246,9 +192,6 @@ function formatBytes(bytes: number): string {
   const units = ["KB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = -1;
-  do {
-    value /= 1024;
-    unit += 1;
-  } while (value >= 1024 && unit < units.length - 1);
+  do { value /= 1024; unit += 1; } while (value >= 1024 && unit < units.length - 1);
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
 }

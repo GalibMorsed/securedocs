@@ -1,43 +1,36 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import type { DocumentRecord } from "../types/documents";
 
-const user = {
-  id: "a6e7c8dc-0050-4756-a1f5-40d3d8ba2292",
-  email: "writer@example.com",
-  full_name: "Writer",
-  is_active: true,
-  created_at: "2026-11-16T00:00:00Z",
-};
+const api = vi.hoisted(() => ({
+  listDocuments: vi.fn(),
+  uploadDocument: vi.fn(),
+  deleteDocument: vi.fn(),
+  downloadDocument: vi.fn(),
+}));
 
-function apiDocument(
-  name: string,
-  id = "e6a941eb-8ae8-493d-84e4-09edc64e84c0",
-): DocumentRecord {
+vi.mock("../api/documents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/documents")>()),
+  ...api,
+}));
+
+const user = { id: "a6e7c8dc-0050-4756-a1f5-40d3d8ba2292", email: "writer@example.com", full_name: "Writer", is_active: true, created_at: "2026-11-16T00:00:00Z" };
+
+function apiDocument(name: string, has_file = true): DocumentRecord {
   return {
-    id,
+    id: "e6a941eb-8ae8-493d-84e4-09edc64e84c0",
     organization_id: "e86f4428-e648-460f-87e4-5ff880595cc2",
     owner_id: user.id,
     name,
-    description: null,
-    mime_type: null,
-    file_size: null,
+    has_file,
+    description: "",
+    mime_type: "text/plain",
+    file_size: 12,
     status: "uploaded",
     created_at: "2026-11-16T00:00:00Z",
     updated_at: "2026-11-16T00:00:00Z",
-    versions: [
-      {
-        id: "0d304106-2ea7-4f57-8598-6194d5dc6f6c",
-        version_number: 1,
-        name,
-        description: null,
-        mime_type: null,
-        file_size: null,
-        created_by: user.id,
-        created_at: "2026-11-16T00:00:00Z",
-      },
-    ],
+    versions: [{ id: "0d304106-2ea7-4f57-8598-6194d5dc6f6c", version_number: 1, name, description: null, mime_type: "text/plain", file_size: 12, created_by: user.id, created_at: "2026-11-16T00:00:00Z" }],
   };
 }
 
@@ -45,88 +38,79 @@ function jsonResponse(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  window.history.replaceState({}, "", "/documents");
+  window.sessionStorage.setItem("securedocs.accessToken", "documents-token");
+  api.listDocuments.mockResolvedValue([]);
+  api.deleteDocument.mockResolvedValue(undefined);
+  api.downloadDocument.mockResolvedValue(new Blob(["document"]));
+  vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+    if (String(url) === "/api/v1/auth/me") return jsonResponse(user);
+    throw new Error(`Unexpected request: ${String(url)}`);
+  }));
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
   window.history.replaceState({}, "", "/");
 });
 
-describe("DocumentsPage", () => {
-  it("lists, creates, and deletes organization document metadata", async () => {
-    window.history.replaceState({}, "", "/documents");
-    window.sessionStorage.setItem("securedocs.accessToken", "documents-token");
-    const records: DocumentRecord[] = [];
-    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      const path = String(url);
-      if (path === "/api/v1/auth/me") return jsonResponse(user);
-      if (path === "/api/v1/documents" && (!init?.method || init.method === "GET")) {
-        return jsonResponse([...records]);
-      }
-      if (path === "/api/v1/documents" && init?.method === "POST") {
-        const payload = JSON.parse(String(init.body)) as {
-          name: string;
-          description: string | null;
-        };
-        const created = apiDocument(payload.name);
-        created.description = payload.description;
-        created.versions[0].description = payload.description;
-        records.unshift(created);
-        return jsonResponse(created, 201);
-      }
-      if (path.endsWith(`/api/v1/documents/${records[0]?.id}`) && init?.method === "DELETE") {
-        records.shift();
-        return { ok: true, status: 204, json: async () => undefined };
-      }
-      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${path}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
+describe("DocumentsPage uploads", () => {
+  it("shows validation errors for unsupported files", async () => {
     render(<App />);
-    expect(await screen.findByText("Your library is empty")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add your first document" }));
-    fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "Quarterly report.pdf" },
-    });
-    fireEvent.change(screen.getByLabelText(/Description/), {
-      target: { value: "Q4 performance" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create document" }));
-
-    expect(await screen.findByRole("heading", { name: "Quarterly report.pdf" })).toBeInTheDocument();
-    expect(screen.getByText("Q4 performance")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Delete Quarterly report.pdf" }));
-    expect(await screen.findByText("Your library is empty")).toBeInTheDocument();
-
-    await waitFor(() => {
-      const documentRequests = fetchMock.mock.calls.filter(([url]) =>
-        String(url).startsWith("/api/v1/documents"),
-      );
-      expect(documentRequests.length).toBeGreaterThanOrEqual(3);
-    });
-    const [, createRequest] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/v1/documents" && init?.method === "POST",
-    ) as [string, RequestInit];
-    expect(JSON.parse(String(createRequest.body))).toEqual({
-      name: "Quarterly report.pdf",
-      description: "Q4 performance",
-      mime_type: null,
-      file_size: null,
-    });
+    await screen.findByText("Your library is empty");
+    const input = screen.getByLabelText("File") as HTMLInputElement;
+    const file = new File(["bad"], "script.exe", { type: "application/octet-stream" });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose a PDF, plain text, or DOCX file");
+    expect(screen.getByRole("button", { name: "Upload file" })).toBeDisabled();
   });
 
-  it("shows an API error and provides retry when listing documents fails", async () => {
-    window.history.replaceState({}, "", "/documents");
-    window.sessionStorage.setItem("securedocs.accessToken", "documents-token");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(user))
-      .mockResolvedValueOnce(jsonResponse({ detail: "Database unavailable" }, 503))
-      .mockResolvedValueOnce(jsonResponse([]));
-    vi.stubGlobal("fetch", fetchMock);
+  it("uploads selected files and displays the returned document with download action", async () => {
+    const uploaded = apiDocument("notes.txt");
+    api.uploadDocument.mockImplementation(async (_file: File, _description: string, progress: (n: number) => void) => {
+      progress(100);
+      return uploaded;
+    });
+    render(<App />);
+    await screen.findByText("Your library is empty");
+    fireEvent.change(screen.getByLabelText("File"), { target: { files: [new File(["notes"], "notes.txt", { type: "text/plain" })] } });
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: "Team notes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
 
+    expect(await screen.findByRole("heading", { name: "notes.txt" })).toBeInTheDocument();
+    expect(api.uploadDocument).toHaveBeenCalledWith(expect.objectContaining({ name: "notes.txt" }), "Team notes", expect.any(Function));
+    expect(screen.getByRole("button", { name: "Download notes.txt" })).toBeInTheDocument();
+    expect(screen.getByLabelText("File")).toHaveValue("");
+  });
+
+  it("shows upload progress, retains the file, and offers retry after an API failure", async () => {
+    let rejectUpload: (error: Error) => void = () => undefined;
+    api.uploadDocument.mockImplementation((_file: File, _description: string, progress: (n: number) => void) => {
+      progress(42);
+      return new Promise((_resolve, reject) => { rejectUpload = reject; });
+    });
+    render(<App />);
+    await screen.findByText("Your library is empty");
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("File"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
+    expect(await screen.findByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+    expect(screen.getByRole("button", { name: "Uploading…" })).toBeDisabled();
+    rejectUpload(new Error("Storage unavailable"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Storage unavailable");
+    expect(screen.getByRole("button", { name: "Retry upload" })).toBeEnabled();
+    expect(screen.getByText("notes.txt · 5 B")).toBeInTheDocument();
+  });
+
+  it("retries document loading after an API failure", async () => {
+    api.listDocuments.mockRejectedValueOnce(new Error("Database unavailable")).mockResolvedValueOnce([]);
     render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Database unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Your library is empty")).toBeInTheDocument();
+    await waitFor(() => expect(api.listDocuments).toHaveBeenCalledTimes(2));
   });
 });

@@ -41,8 +41,18 @@ services:
       CORS_ORIGINS: '["http://localhost:5173"]'
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-development-only-change-this-secret-before-deploying}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      LOCAL_STORAGE_PATH: /app/private_uploads
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-10485760}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_PREFIX: ${S3_PREFIX:-securedocs}
+      S3_SERVER_SIDE_ENCRYPTION: ${S3_SERVER_SIDE_ENCRYPTION:-AES256}
     ports:
       - "8000:8000"
+    volumes:
+      - document_uploads:/app/private_uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,6 +64,7 @@ services:
       context: ./frontend
     environment:
       VITE_API_PROXY_TARGET: http://backend:8000
+      VITE_MAX_UPLOAD_BYTES: ${UPLOAD_MAX_BYTES:-10485760}
     ports:
       - "5173:5173"
     depends_on:
@@ -62,3 +73,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  document_uploads:

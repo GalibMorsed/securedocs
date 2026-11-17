@@ -19,6 +19,9 @@ coverage/
 
 # Local data
 storage/
+!backend/app/storage/
+!backend/app/storage/**
+backend/private_uploads/
 *.log
 
 # OS / IDE

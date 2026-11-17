@@ -2,7 +2,14 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 DocumentStatus = Literal["uploaded", "processing", "ready", "failed"]
 
@@ -72,6 +79,7 @@ class DocumentResponse(BaseModel):
     id: UUID
     organization_id: UUID
     owner_id: UUID
+    storage_key: str | None = Field(exclude=True)
     name: str
     description: str | None
     mime_type: str | None
@@ -80,3 +88,8 @@ class DocumentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     versions: list[DocumentVersionResponse]
+
+    @computed_field
+    @property
+    def has_file(self) -> bool:
+        return self.storage_key is not None

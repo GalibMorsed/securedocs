@@ -2,8 +2,8 @@
 
 Secure enterprise document management and AI-powered knowledge retrieval using RAG.
 
-**Current status: Authentication and document metadata foundation.**
-React + FastAPI + PostgreSQL (pgvector) + Redis, with account registration, organization-scoped document metadata, bearer-token authentication, protected workspace routes, and service diagnostics.
+**Current status: Authentication and private document uploads.**
+React + FastAPI + PostgreSQL (pgvector) + Redis, with account registration, organization-scoped documents, private local/S3 file storage, bearer-token authentication, protected workspace routes, and service diagnostics.
 
 ## Stack
 
@@ -13,7 +13,7 @@ React + FastAPI + PostgreSQL (pgvector) + Redis, with account registration, orga
 | Backend | Python 3.12+, FastAPI, SQLAlchemy 2, Alembic, Pytest |
 | Database | PostgreSQL 17 + pgvector |
 | Queue (later) | Redis + Celery |
-| Storage (later) | AWS S3 |
+| Storage | Private local volume for development; private AWS S3 for production |
 
 ## Prerequisites
 
@@ -53,17 +53,20 @@ In Swagger at http://localhost:8000/docs, register or log in first, copy `access
 
 Frontend routes: `/` redirects to login (or the dashboard for an existing session), `/login` and `/register` are guest pages, `/dashboard` and `/documents` require a valid session, and `/status` remains available for service diagnostics.
 
-### Document metadata API
+### Documents and file uploads
 
 All document routes require a valid bearer token and an organization membership. For this first organization-aware workflow, documents are created in the user’s registration organization; list, detail, update, and delete queries are scoped to that organization. Documents created by another organization return `404`. Owners and administrators can edit or delete any document in their organization; members can manage their own documents, and viewers have read-only access. A document metadata update creates a new `document_versions` snapshot.
 
-- `POST /api/v1/documents` accepts `name`, optional `description`, `mime_type`, and `file_size` (bytes); no file is stored yet.
+- `POST /api/v1/documents/upload` accepts multipart `file` and optional `description`. PDF, UTF-8 plain text, and DOCX are supported, up to 10 MiB by default. The API validates the declared MIME type, extension, size, and file content before storing.
 - `GET /api/v1/documents?offset=0&limit=100` lists organization documents.
 - `GET /api/v1/documents/{id}` returns metadata and version history.
 - `PATCH /api/v1/documents/{id}` updates metadata and records a new version.
-- `DELETE /api/v1/documents/{id}` deletes the record and its version/permission rows.
+- `GET /api/v1/documents/{id}/download` streams the private file after checking the user's organization membership.
+- `DELETE /api/v1/documents/{id}` deletes the private object and its record/version/permission rows.
 
-The Documents page supports creating metadata records and deleting them. Real upload, private local storage, S3, and download URLs are not enabled yet.
+The Documents page supports uploads with progress, retry after a failure, downloads, and deletion. The storage key and filesystem path are never returned in API responses. Local uploads are stored in the Docker `document_uploads` volume at `/app/private_uploads`, outside the served frontend and API static paths.
+
+For production, set `STORAGE_BACKEND=s3`, `S3_BUCKET` to a private bucket, and optionally `S3_REGION`, `S3_PREFIX`, and `S3_SERVER_SIDE_ENCRYPTION` (`AES256` or `aws:kms`). Give the backend IAM role only the required object access to that bucket/prefix; the adapter does not make objects public and applies server-side encryption. Configure AWS credentials using the standard SDK provider chain. Set `UPLOAD_MAX_BYTES` to the desired limit in bytes; the frontend reads the same value through Compose. S3 downloads are proxied through the authenticated API rather than exposing bucket URLs.
 
 ### 1. Infrastructure (Postgres + pgvector, Redis)
 

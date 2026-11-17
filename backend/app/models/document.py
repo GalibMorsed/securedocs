@@ -71,3 +71,7 @@ class Document(Base):
         back_populates="document",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def has_file(self) -> bool:
+        return self.storage_key is not None

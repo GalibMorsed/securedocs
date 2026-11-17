@@ -1,7 +1,14 @@
+from io import BytesIO
 from uuid import UUID
+import zipfile
 
+import pytest
+
+from app.core.config import settings
 from app.core.security import create_access_token, hash_password
 from app.models import Document, DocumentPermission, OrganizationMember, User
+from app.services import document_service
+from app.storage import StorageError
 
 
 def _register(client, *, email: str, organization: str) -> dict:
@@ -46,7 +53,7 @@ def test_document_metadata_crud_and_version_history(auth_client):
     assert document["owner_id"] == account["user"]["id"]
     assert len(document["versions"]) == 1
     assert document["versions"][0]["version_number"] == 1
-    assert document.get("storage_key") is None
+    assert document["has_file"] is False
 
     listed = auth_client.get("/api/v1/documents", headers=headers)
     assert listed.status_code == 200
@@ -228,3 +235,175 @@ def test_document_edit_permission_grant_allows_member_to_edit(auth_client):
     )
     assert updated.status_code == 200
     assert updated.json()["description"] == "Edited by a permitted teammate"
+
+
+def test_private_text_upload_and_download(auth_client):
+    account = _register(
+        auth_client, email="upload@example.com", organization="Upload Org"
+    )
+    content = b"Private team notes.\n"
+    response = auth_client.post(
+        "/api/v1/documents/upload",
+        headers=_headers(account["access_token"]),
+        data={"description": "Quarterly notes"},
+        files={"file": ("notes.txt", content, "text/plain")},
+    )
+
+    assert response.status_code == 201
+    document = response.json()
+    assert document["name"] == "notes.txt"
+    assert document["mime_type"] == "text/plain"
+    assert document["file_size"] == len(content)
+    assert document["description"] == "Quarterly notes"
+    assert document["has_file"] is True
+    assert "storage_key" not in document
+
+    with auth_client.app.state.test_session() as db:
+        stored_document = db.get(Document, UUID(document["id"]))
+        assert stored_document is not None
+        storage_key = stored_document.storage_key
+    stored_path = auth_client.app.state.test_storage.root / storage_key
+    assert stored_path.is_file()
+
+    downloaded = auth_client.get(
+        f"/api/v1/documents/{document['id']}/download",
+        headers=_headers(account["access_token"]),
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.content == content
+    assert downloaded.headers["content-type"] == "text/plain; charset=utf-8"
+    assert downloaded.headers["cache-control"] == "private, no-store"
+    assert str(auth_client.app.state.test_storage.root) not in downloaded.headers.get(
+        "content-disposition", ""
+    )
+
+
+def test_docx_upload_checks_zip_package_structure(auth_client):
+    account = _register(
+        auth_client, email="docx@example.com", organization="DOCX Org"
+    )
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", "<document/>")
+
+    response = auth_client.post(
+        "/api/v1/documents/upload",
+        headers=_headers(account["access_token"]),
+        files={
+            "file": (
+                "brief.docx",
+                buffer.getvalue(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["has_file"] is True
+
+
+def test_upload_rejects_bad_signature_unsupported_type_and_oversize(auth_client, monkeypatch):
+    account = _register(
+        auth_client, email="validation@example.com", organization="Validation Org"
+    )
+    headers = _headers(account["access_token"])
+
+    bad_pdf = auth_client.post(
+        "/api/v1/documents/upload",
+        headers=headers,
+        files={"file": ("bad.pdf", b"plain text", "application/pdf")},
+    )
+    unsupported = auth_client.post(
+        "/api/v1/documents/upload",
+        headers=headers,
+        files={"file": ("archive.bin", b"data", "application/octet-stream")},
+    )
+    assert bad_pdf.status_code == 415
+    assert unsupported.status_code == 415
+
+    monkeypatch.setattr(settings, "upload_max_bytes", 4)
+    oversized = auth_client.post(
+        "/api/v1/documents/upload",
+        headers=headers,
+        files={"file": ("large.txt", b"12345", "text/plain")},
+    )
+    assert oversized.status_code == 413
+    assert auth_client.get(
+        "/api/v1/documents", headers=headers
+    ).json() == []
+    assert list(auth_client.app.state.test_storage.root.iterdir()) == []
+
+
+def test_upload_requires_authentication(auth_client):
+    response = auth_client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("private.txt", b"private", "text/plain")},
+    )
+    assert response.status_code == 401
+    assert list(auth_client.app.state.test_storage.root.iterdir()) == []
+
+
+def test_other_organization_cannot_download_uploaded_file(auth_client):
+    first = _register(
+        auth_client, email="file-owner@example.com", organization="File Org A"
+    )
+    second = _register(
+        auth_client, email="file-outsider@example.com", organization="File Org B"
+    )
+    uploaded = auth_client.post(
+        "/api/v1/documents/upload",
+        headers=_headers(first["access_token"]),
+        files={"file": ("secret.txt", b"secret", "text/plain")},
+    )
+    assert uploaded.status_code == 201
+
+    cross_org = auth_client.get(
+        f"/api/v1/documents/{uploaded.json()['id']}/download",
+        headers=_headers(second["access_token"]),
+    )
+    assert cross_org.status_code == 404
+
+
+def test_upload_storage_failure_removes_partial_file_and_creates_no_document(
+    auth_client, monkeypatch
+):
+    account = _register(
+        auth_client, email="storage-fail@example.com", organization="Failure Org"
+    )
+    storage = auth_client.app.state.test_storage
+    original_store = storage.store
+
+    def store_then_fail(key: str, content: bytes, content_type: str) -> None:
+        original_store(key, content, content_type)
+        raise StorageError("simulated storage failure")
+
+    monkeypatch.setattr(storage, "store", store_then_fail)
+    response = auth_client.post(
+        "/api/v1/documents/upload",
+        headers=_headers(account["access_token"]),
+        files={"file": ("failure.txt", b"contents", "text/plain")},
+    )
+    assert response.status_code == 503
+    assert auth_client.get(
+        "/api/v1/documents", headers=_headers(account["access_token"])
+    ).json() == []
+    assert list(storage.root.iterdir()) == []
+
+
+def test_database_failure_after_storage_removes_orphaned_file(auth_client, monkeypatch):
+    account = _register(
+        auth_client, email="db-fail@example.com", organization="DB Failure Org"
+    )
+
+    def fail_create(*args, **kwargs):
+        raise RuntimeError("simulated database failure")
+
+    monkeypatch.setattr(document_service, "create_document", fail_create)
+    with pytest.raises(RuntimeError, match="simulated database failure"):
+        auth_client.post(
+            "/api/v1/documents/upload",
+            headers=_headers(account["access_token"]),
+            files={"file": ("orphan.txt", b"contents", "text/plain")},
+        )
+
+    assert list(auth_client.app.state.test_storage.root.iterdir()) == []

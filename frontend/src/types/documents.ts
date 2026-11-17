@@ -15,6 +15,7 @@ export interface DocumentRecord {
   id: string;
   organization_id: string;
   owner_id: string;
+  has_file: boolean;
   name: string;
   description: string | null;
   mime_type: string | null;

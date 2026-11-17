@@ -1,4 +1,6 @@
 from uuid import UUID
+import logging
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -11,6 +13,9 @@ from app.models import (
     User,
 )
 from app.schemas.documents import DocumentCreate, DocumentUpdate
+from app.storage.base import FileStorage
+
+logger = logging.getLogger(__name__)
 
 
 def get_user_membership(db: Session, user: User) -> OrganizationMember | None:
@@ -60,6 +65,7 @@ def create_document(
     organization_id: UUID,
     owner_id: UUID,
     payload: DocumentCreate,
+    storage_key: str | None = None,
 ) -> Document:
     document = Document(
         organization_id=organization_id,
@@ -68,6 +74,7 @@ def create_document(
         description=payload.description,
         mime_type=payload.mime_type,
         file_size=payload.file_size,
+        storage_key=storage_key,
         status="uploaded",
     )
     document.versions.append(
@@ -77,12 +84,63 @@ def create_document(
             description=document.description,
             mime_type=document.mime_type,
             file_size=document.file_size,
+            storage_key=storage_key,
             created_by=owner_id,
         )
     )
     db.add(document)
     db.commit()
     return get_document(db, organization_id, document.id)  # type: ignore[return-value]
+
+
+def create_uploaded_document(
+    db: Session,
+    *,
+    organization_id: UUID,
+    owner_id: UUID,
+    name: str,
+    description: str | None,
+    mime_type: str,
+    content: bytes,
+    storage: FileStorage,
+) -> Document:
+    extension = {
+        "application/pdf": ".pdf",
+        "text/plain": ".txt",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    }[mime_type]
+    storage_key = f"{uuid.uuid4().hex}{extension}"
+
+    try:
+        storage.store(storage_key, content, mime_type)
+    except Exception:
+        _cleanup_storage_object(storage, storage_key)
+        raise
+
+    payload = DocumentCreate(
+        name=name,
+        description=description,
+        mime_type=mime_type,
+        file_size=len(content),
+    )
+    try:
+        return create_document(
+            db,
+            organization_id=organization_id,
+            owner_id=owner_id,
+            payload=payload,
+            storage_key=storage_key,
+        )
+    except Exception:
+        _cleanup_storage_object(storage, storage_key)
+        raise
+
+
+def _cleanup_storage_object(storage: FileStorage, storage_key: str) -> None:
+    try:
+        storage.delete(storage_key)
+    except Exception:
+        logger.exception("Failed to clean up storage object after document creation failure")
 
 
 def can_edit_document(
@@ -146,6 +204,10 @@ def update_document(
     return get_document(db, document.organization_id, document.id)  # type: ignore[return-value]
 
 
-def delete_document(db: Session, document: Document) -> None:
+def delete_document(
+    db: Session, document: Document, storage: FileStorage | None = None
+) -> None:
+    if document.storage_key is not None and storage is not None:
+        storage.delete(document.storage_key)
     db.delete(document)
     db.commit()
