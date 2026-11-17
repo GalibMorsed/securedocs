@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -26,6 +27,7 @@ export function AppLayout() {
             <NavLink to="/status" className={linkClass}>System status</NavLink>
           </nav>
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <span className="hidden max-w-40 truncate text-sm text-muted sm:block" title={user?.email}>
               {user?.full_name}
             </span>

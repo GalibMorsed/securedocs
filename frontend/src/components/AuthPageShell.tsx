@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function AuthPageShell({
   title,
@@ -13,7 +14,8 @@ export function AuthPageShell({
   footer: ReactNode;
 }) {
   return (
-    <main className="grid min-h-screen bg-white lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.9fr)]">
+    <main className="relative grid min-h-screen bg-white lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.9fr)]">
+      <ThemeToggle className="fixed right-5 top-5 z-20" />
       <section className="relative hidden overflow-hidden bg-[#12283f] px-12 py-10 text-white lg:flex lg:flex-col lg:justify-between xl:px-20">
         <div className="absolute -right-28 top-1/4 h-96 w-96 rounded-full border border-white/10" />
         <div className="absolute -right-10 top-[32%] h-64 w-64 rounded-full border border-white/10" />

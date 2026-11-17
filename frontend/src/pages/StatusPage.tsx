@@ -1,5 +1,6 @@
 import { ServiceRow } from "../components/ServiceRow";
 import { useReadiness } from "../hooks/useReadiness";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 export function StatusPage() {
   const { data, error, loading, refresh } = useReadiness();
@@ -13,7 +14,8 @@ export function StatusPage() {
         : "Some services are unreachable";
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
+    <main className="relative mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
+      <ThemeToggle className="absolute right-6 top-6" />
       <h1 className="text-4xl font-semibold tracking-tight">SecureDocs</h1>
       <p className="mt-2 text-muted">
         Secure document management with AI search. This page checks that your

@@ -7,25 +7,28 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { StatusPage } from "./pages/StatusPage";
+import { ThemeProvider } from "./theme/ThemeProvider";
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/" element={<HomeRedirect />} />
-          <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
-          <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
-          <Route path="/status" element={<StatusPage />} />
-          <Route element={<RequireAuth />}>
-            <Route element={<AppLayout />}>
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/documents" element={<DocumentsPage />} />
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
+            <Route path="/" element={<HomeRedirect />} />
+            <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
+            <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
+            <Route path="/status" element={<StatusPage />} />
+            <Route element={<RequireAuth />}>
+              <Route element={<AppLayout />}>
+                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/documents" element={<DocumentsPage />} />
+              </Route>
             </Route>
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
