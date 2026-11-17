@@ -2,8 +2,8 @@
 
 Secure enterprise document management and AI-powered knowledge retrieval using RAG.
 
-**Current status: Authentication and private document uploads.**
-React + FastAPI + PostgreSQL (pgvector) + Redis, with account registration, organization-scoped documents, private local/S3 file storage, bearer-token authentication, protected workspace routes, and service diagnostics.
+**Current status: Authentication, private uploads, and asynchronous text processing.**
+React + FastAPI + PostgreSQL (pgvector) + Redis/Celery, with organization-scoped documents, private local/S3 file storage, and TXT/PDF/DOCX extraction into searchable chunks.
 
 ## Stack
 
@@ -12,7 +12,7 @@ React + FastAPI + PostgreSQL (pgvector) + Redis, with account registration, orga
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, Vitest |
 | Backend | Python 3.12+, FastAPI, SQLAlchemy 2, Alembic, Pytest |
 | Database | PostgreSQL 17 + pgvector |
-| Queue (later) | Redis + Celery |
+| Queue | Redis + Celery worker |
 | Storage | Private local volume for development; private AWS S3 for production |
 
 ## Prerequisites
@@ -21,11 +21,11 @@ Git, Python 3.12+, Node.js LTS, Docker Desktop.
 
 ## Run it locally
 
-Use three terminals. Commands are for Windows PowerShell; macOS/Linux equivalents are noted.
+Use Docker Compose for the full stack. For manual local development, run PostgreSQL/Redis, the API, the Celery worker, and the frontend in separate terminals. Commands are for Windows PowerShell; macOS/Linux equivalents are noted.
 
 ### Run the full stack with Docker
 
-From the repository root, build and start the API, frontend, PostgreSQL/pgvector, and Redis:
+From the repository root, build and start the API, frontend, PostgreSQL/pgvector, Redis, and document worker:
 
 ```powershell
 docker compose up --build
@@ -37,7 +37,7 @@ In a second terminal, apply the database migration:
 docker compose exec backend alembic upgrade head
 ```
 
-This applies the pgvector extension migration and creates the `organizations`, `users`, `organization_members`, `documents`, `document_versions`, and `document_permissions` tables. To create a migration after changing SQLAlchemy models, run `docker compose exec backend alembic revision --autogenerate -m "describe the schema change"`, review the generated file under `backend/alembic/versions/`, then apply it with `docker compose exec backend alembic upgrade head`. Do not edit migrations that have already been applied.
+This applies the pgvector extension migration and creates the organization, user, document, document version, permission, processing-state, and document chunk tables. To create a migration after changing SQLAlchemy models, run `docker compose exec backend alembic revision --autogenerate -m "describe the schema change"`, review the generated file under `backend/alembic/versions/`, then apply it with `docker compose exec backend alembic upgrade head`. Do not edit migrations that have already been applied.
 
 Open http://localhost:5173. The API docs are at http://localhost:8000/docs. Stop the stack with `Ctrl+C`; run `docker compose down` to stop and remove the containers.
 
@@ -61,10 +61,13 @@ All document routes require a valid bearer token and an organization membership.
 - `GET /api/v1/documents?offset=0&limit=100` lists organization documents.
 - `GET /api/v1/documents/{id}` returns metadata and version history.
 - `PATCH /api/v1/documents/{id}` updates metadata and records a new version.
+- `POST /api/v1/documents/{id}/retry` requeues a failed or not-yet-started file for processing.
 - `GET /api/v1/documents/{id}/download` streams the private file after checking the user's organization membership.
 - `DELETE /api/v1/documents/{id}` deletes the private object and its record/version/permission rows.
 
-The Documents page supports uploads with progress, retry after a failure, downloads, and deletion. The storage key and filesystem path are never returned in API responses. Local uploads are stored in the Docker `document_uploads` volume at `/app/private_uploads`, outside the served frontend and API static paths.
+The upload request stores the file and metadata, queues a Celery task, and returns without doing extraction in the request. The worker extracts TXT, PDF, or DOCX text, normalizes it, splits it into overlapping chunks, and marks the document `ready`. Empty or unreadable files are marked `failed` with a safe explanation. The Documents page refreshes pending statuses and provides retry for failed files. Processing status fields and each chunk's version association are available in the document response/database. OCR for scanned PDFs and embeddings are not enabled yet; scanned PDFs with no selectable text receive an OCR-required error.
+
+The storage key and filesystem path are never returned in API responses. Local uploads are stored in the Docker `document_uploads` volume at `/app/private_uploads`, mounted by both the API and worker outside the served frontend and API static paths. Celery uses Redis database 1 by default; the app's Redis services use database 0.
 
 For production, set `STORAGE_BACKEND=s3`, `S3_BUCKET` to a private bucket, and optionally `S3_REGION`, `S3_PREFIX`, and `S3_SERVER_SIDE_ENCRYPTION` (`AES256` or `aws:kms`). Give the backend IAM role only the required object access to that bucket/prefix; the adapter does not make objects public and applies server-side encryption. Configure AWS credentials using the standard SDK provider chain. Set `UPLOAD_MAX_BYTES` to the desired limit in bytes; the frontend reads the same value through Compose. S3 downloads are proxied through the authenticated API rather than exposing bucket URLs.
 
@@ -75,7 +78,7 @@ docker compose up -d
 docker ps
 ```
 
-You should see `securedocs-postgres` and `securedocs-redis`, both `healthy`.
+You should see `securedocs-postgres` and `securedocs-redis`, both `healthy`, along with the API, frontend, and worker containers.
 
 ### 2. Backend
 
@@ -93,7 +96,16 @@ uvicorn app.main:app --reload
 - Liveness: http://localhost:8000/api/v1/health
 - Dependencies: http://localhost:8000/api/v1/health/services
 
-### 3. Frontend
+### 3. Document worker (manual local development)
+
+After applying migrations, run the worker from the `backend` directory. On Windows use Celery's `solo` pool; Linux/macOS can use its default prefork pool.
+
+```powershell
+cd backend
+celery -A app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo
+```
+
+### 4. Frontend
 
 ```powershell
 cd frontend
@@ -101,7 +113,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. All three services should show **Connected**.
+Open http://localhost:5173. The status page checks API dependencies; the Celery worker is visible with `docker compose ps` or `docker compose logs worker`.
 
 ## Tests
 
@@ -123,12 +135,12 @@ cd frontend; npm test
 ```
 backend/app/
   core/        config, database, redis
-  api/v1/      routers (health now; auth, documents, search, chat later)
-  services/    business logic
+  api/v1/      health, auth, organization-scoped documents
+  services/    extraction, normalization, chunking, business logic
   schemas/     Pydantic request/response models
   models/      SQLAlchemy models (Phase 2+)
   rag/         RAG pipeline (later phases)
-  workers/     Celery tasks (later phases)
+  workers/     Celery app and document processing tasks
 frontend/src/
   api/ hooks/ components/ pages/ types/
 infrastructure/  docker, nginx, aws (later)

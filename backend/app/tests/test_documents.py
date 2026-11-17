@@ -1,8 +1,8 @@
 from io import BytesIO
 from uuid import UUID
-import zipfile
 
 import pytest
+from docx import Document as WordDocument
 
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password
@@ -283,9 +283,9 @@ def test_docx_upload_checks_zip_package_structure(auth_client):
         auth_client, email="docx@example.com", organization="DOCX Org"
     )
     buffer = BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("[Content_Types].xml", "<Types/>")
-        archive.writestr("word/document.xml", "<document/>")
+    docx = WordDocument()
+    docx.add_paragraph("A valid DOCX document.")
+    docx.save(buffer)
 
     response = auth_client.post(
         "/api/v1/documents/upload",

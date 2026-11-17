@@ -21,6 +21,9 @@ export interface DocumentRecord {
   mime_type: string | null;
   file_size: number | null;
   status: DocumentStatus;
+  processing_started_at: string | null;
+  processed_at: string | null;
+  processing_error: string | null;
   created_at: string;
   updated_at: string;
   versions: DocumentVersion[];

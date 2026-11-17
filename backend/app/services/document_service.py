@@ -187,6 +187,11 @@ def update_document(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(document, field, value)
 
+    document.status = "uploaded"
+    document.processing_started_at = None
+    document.processed_at = None
+    document.processing_error = None
+
     next_version = (document.versions[-1].version_number if document.versions else 0) + 1
     document.versions.append(
         DocumentVersion(

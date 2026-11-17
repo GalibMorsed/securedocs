@@ -54,3 +54,6 @@ class DocumentVersion(Base):
     )
 
     document: Mapped["Document"] = relationship(back_populates="versions")
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        back_populates="version", cascade="all, delete-orphan"
+    )

@@ -59,6 +59,13 @@ class Document(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="documents")
     owner: Mapped["User"] = relationship(back_populates="documents")
@@ -70,6 +77,9 @@ class Document(Base):
     permissions: Mapped[list["DocumentPermission"]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
+    )
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
     )
 
     @property

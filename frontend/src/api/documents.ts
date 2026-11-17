@@ -52,6 +52,12 @@ export function deleteDocument(id: string) {
   });
 }
 
+export function retryDocumentProcessing(id: string) {
+  return apiRequest<DocumentRecord>(`/documents/${encodeURIComponent(id)}/retry`, {
+    method: "POST",
+  });
+}
+
 export function uploadDocument(
   file: File,
   description: string,

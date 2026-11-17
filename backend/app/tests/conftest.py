@@ -10,6 +10,7 @@ from app.core.database import Base
 from app.core.redis import get_redis
 from app.main import app
 from app.storage import LocalStorage, get_storage
+from app.workers.queue import get_processing_queue
 
 
 @pytest.fixture
@@ -34,7 +35,9 @@ def auth_client(tmp_path):
     test_session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     app.state.test_session = test_session
     test_storage = LocalStorage(tmp_path / "private-files")
+    queued_document_ids = []
     app.state.test_storage = test_storage
+    app.state.test_queued_document_ids = queued_document_ids
 
     def override_get_db():
         with test_session() as db:
@@ -42,12 +45,15 @@ def auth_client(tmp_path):
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_storage] = lambda: test_storage
+    app.dependency_overrides[get_processing_queue] = lambda: queued_document_ids.append
     try:
         with TestClient(app) as test_client:
             yield test_client
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_storage, None)
+        app.dependency_overrides.pop(get_processing_queue, None)
         del app.state.test_session
         del app.state.test_storage
+        del app.state.test_queued_document_ids
         engine.dispose()

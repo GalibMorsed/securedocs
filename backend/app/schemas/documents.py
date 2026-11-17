@@ -85,6 +85,9 @@ class DocumentResponse(BaseModel):
     mime_type: str | None
     file_size: int | None
     status: DocumentStatus
+    processing_started_at: datetime | None
+    processed_at: datetime | None
+    processing_error: str | None
     created_at: datetime
     updated_at: datetime
     versions: list[DocumentVersionResponse]

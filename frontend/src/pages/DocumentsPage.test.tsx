@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   uploadDocument: vi.fn(),
   deleteDocument: vi.fn(),
   downloadDocument: vi.fn(),
+  retryDocumentProcessing: vi.fn(),
 }));
 
 vi.mock("../api/documents", async (importOriginal) => ({
@@ -28,6 +29,9 @@ function apiDocument(name: string, has_file = true): DocumentRecord {
     mime_type: "text/plain",
     file_size: 12,
     status: "uploaded",
+    processing_started_at: null,
+    processed_at: null,
+    processing_error: null,
     created_at: "2026-11-16T00:00:00Z",
     updated_at: "2026-11-16T00:00:00Z",
     versions: [{ id: "0d304106-2ea7-4f57-8598-6194d5dc6f6c", version_number: 1, name, description: null, mime_type: "text/plain", file_size: 12, created_by: user.id, created_at: "2026-11-16T00:00:00Z" }],
@@ -45,6 +49,11 @@ beforeEach(() => {
   api.listDocuments.mockResolvedValue([]);
   api.deleteDocument.mockResolvedValue(undefined);
   api.downloadDocument.mockResolvedValue(new Blob(["document"]));
+  api.retryDocumentProcessing.mockImplementation(async (id: string) => {
+    const retried = apiDocument("reprocessed.txt");
+    retried.id = id;
+    return retried;
+  });
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
     if (String(url) === "/api/v1/auth/me") return jsonResponse(user);
     throw new Error(`Unexpected request: ${String(url)}`);
@@ -112,5 +121,18 @@ describe("DocumentsPage uploads", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Your library is empty")).toBeInTheDocument();
     await waitFor(() => expect(api.listDocuments).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a safe processing failure and allows a retry", async () => {
+    const failed = apiDocument("empty.txt");
+    failed.status = "failed";
+    failed.processing_error = "No searchable text was found in this document.";
+    api.listDocuments.mockResolvedValue([failed]);
+    render(<App />);
+
+    expect(await screen.findByText("No searchable text was found in this document.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry processing empty.txt" }));
+    await waitFor(() => expect(api.retryDocumentProcessing).toHaveBeenCalledWith(failed.id));
+    expect(await screen.findByText("uploaded", { exact: false })).toBeInTheDocument();
   });
 });

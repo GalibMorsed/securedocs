@@ -1,4 +1,5 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+import logging
 from uuid import UUID
 from urllib.parse import quote
 
@@ -19,15 +20,16 @@ from sqlalchemy.orm import Session
 from app.api.v1.dependencies import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
-from app.models import OrganizationMember, User
+from app.models import Document, OrganizationMember, User
 from app.schemas.documents import DocumentCreate, DocumentResponse, DocumentUpdate
-from app.services import document_service
+from app.services import document_processing, document_service
 from app.services.file_validation import InvalidUploadedFile, validate_file
 from app.storage import FileStorage, StorageError, StorageNotFound, get_storage
+from app.workers.queue import EnqueueDocument, get_processing_queue
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 UPLOAD_CHUNK_SIZE = 64 * 1024
-
+logger = logging.getLogger(__name__)
 
 
 def _require_membership(db: Session, user: User) -> OrganizationMember:
@@ -93,6 +95,7 @@ def upload_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     storage: FileStorage = Depends(get_storage),
+    enqueue_document: EnqueueDocument = Depends(get_processing_queue),
 ) -> DocumentResponse:
     membership = _require_membership(db, current_user)
     if membership.role == "viewer":
@@ -113,23 +116,23 @@ def upload_document(
         file.file.close()
 
     try:
-        return DocumentResponse.model_validate(
-            document_service.create_uploaded_document(
-                db,
-                organization_id=membership.organization_id,
-                owner_id=current_user.id,
-                name=validated.name,
-                description=description,
-                mime_type=validated.mime_type,
-                content=content,
-                storage=storage,
-            )
+        document = document_service.create_uploaded_document(
+            db,
+            organization_id=membership.organization_id,
+            owner_id=current_user.id,
+            name=validated.name,
+            description=description,
+            mime_type=validated.mime_type,
+            content=content,
+            storage=storage,
         )
     except StorageError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Private file storage is unavailable",
         ) from exc
+    _queue_document(db, document, enqueue_document)
+    return DocumentResponse.model_validate(document)
 
 
 @router.get(
@@ -203,6 +206,7 @@ def update_document(
     payload: DocumentUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    enqueue_document: EnqueueDocument = Depends(get_processing_queue),
 ) -> DocumentResponse:
     membership = _require_membership(db, current_user)
     document = document_service.get_document(
@@ -210,16 +214,65 @@ def update_document(
     )
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
-    if not document_service.can_edit_document(db, document, membership):
+    if membership.role == "viewer" or not document_service.can_edit_document(
+        db, document, membership
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to edit this document",
         )
-    return DocumentResponse.model_validate(
-        document_service.update_document(
-            db, document=document, payload=payload, actor_id=current_user.id
-        )
+    updated = document_service.update_document(
+        db, document=document, payload=payload, actor_id=current_user.id
     )
+    if updated.storage_key is not None:
+        _queue_document(db, updated, enqueue_document)
+    return DocumentResponse.model_validate(updated)
+
+
+@router.post(
+    "/{document_id}/retry",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Retry document text processing",
+)
+def retry_document_processing(
+    document_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    enqueue_document: EnqueueDocument = Depends(get_processing_queue),
+) -> DocumentResponse:
+    membership = _require_membership(db, current_user)
+    document = document_service.get_document(
+        db, membership.organization_id, document_id
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if membership.role == "viewer" or not document_service.can_edit_document(
+        db, document, membership
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to retry this document",
+        )
+    if document.storage_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document does not have an uploaded file to process",
+        )
+    if document.status == "processing" and not document_processing.is_processing_stale(document):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is already being processed",
+        )
+    if document.status == "ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document has already been processed",
+        )
+
+    document_processing.reset_for_retry(db, document)
+    _queue_document(db, document, enqueue_document)
+    return DocumentResponse.model_validate(document)
 
 
 @router.delete(
@@ -276,6 +329,16 @@ def _read_upload(file: UploadFile) -> bytes:
             )
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+def _queue_document(
+    db: Session, document: Document, enqueue_document: Callable[[UUID], None]
+) -> None:
+    try:
+        enqueue_document(document.id)  # type: ignore[attr-defined]
+    except Exception:
+        logger.exception("Could not enqueue processing for document %s", document.id)
+        document_processing.mark_queue_failed(db, document)
 
 
 def _stream_file(stream: object) -> Iterator[bytes]:

@@ -23,6 +23,7 @@ class Settings(BaseSettings):
         "postgresql+psycopg://securedocs:securedocs_password@localhost:5432/securedocs"
     )
     redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: str | None = None
 
     storage_backend: Literal["local", "s3"] = "local"
     local_storage_path: Path = Path("private_uploads")

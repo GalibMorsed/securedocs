@@ -6,6 +6,7 @@ import {
   downloadDocument,
   listDocuments,
   MAX_UPLOAD_BYTES,
+  retryDocumentProcessing,
   uploadDocument,
   validateSelectedFile,
 } from "../api/documents";
@@ -31,21 +32,31 @@ export function DocumentsPage() {
   const [uploadFailed, setUploadFailed] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setLoadError(null);
     try {
       setDocuments(await listDocuments());
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Could not load documents.");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  const hasPendingFiles = documents.some(
+    (document) => document.has_file && (document.status === "uploaded" || document.status === "processing"),
+  );
+  useEffect(() => {
+    if (!hasPendingFiles) return;
+    const interval = window.setInterval(() => { void refresh(false); }, 2500);
+    return () => window.clearInterval(interval);
+  }, [hasPendingFiles, refresh]);
 
   function handleFileChange(file: File | null) {
     setActionError(null);
@@ -105,6 +116,19 @@ export function DocumentsPage() {
       setActionError(error instanceof ApiError ? error.message : "Could not delete the document.");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function handleRetry(document: DocumentRecord) {
+    setActionError(null);
+    setRetryingId(document.id);
+    try {
+      const retried = await retryDocumentProcessing(document.id);
+      setDocuments((current) => current.map((item) => item.id === document.id ? retried : item));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not retry document processing.");
+    } finally {
+      setRetryingId(null);
     }
   }
 
@@ -172,8 +196,8 @@ export function DocumentsPage() {
               : <ul className="overflow-hidden rounded-xl border border-line bg-white shadow-sm">
                 {documents.map((document) => (
                   <li key={document.id} className="flex flex-col gap-4 border-b border-line p-5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                    <div className="flex min-w-0 items-start gap-4"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-accent" aria-hidden="true">▤</div><div className="min-w-0"><h2 className="truncate font-semibold">{document.name}</h2>{document.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{document.description}</p>}<p className="mt-2 text-xs text-muted">{document.mime_type ?? "Metadata only"}{document.file_size !== null && ` · ${formatBytes(document.file_size)}`}{` · ${document.versions.length} ${document.versions.length === 1 ? "version" : "versions"}`}</p></div></div>
-                    <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end"><div className="text-right"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusStyles[document.status]}`}>{document.status}</span><p className="mt-1 text-xs text-muted">Updated {formatDate(document.updated_at)}</p></div>{document.has_file && <button type="button" onClick={() => void handleDownload(document)} disabled={downloadingId === document.id} aria-label={`Download ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-accent hover:bg-blue-50 disabled:opacity-60">{downloadingId === document.id ? "Downloading…" : "Download"}</button>}<button type="button" onClick={() => void handleDelete(document)} disabled={deletingId === document.id} aria-label={`Delete ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-fail hover:bg-red-50 disabled:opacity-60">{deletingId === document.id ? "Deleting…" : "Delete"}</button></div>
+                    <div className="flex min-w-0 items-start gap-4"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-accent" aria-hidden="true">▤</div><div className="min-w-0"><h2 className="truncate font-semibold">{document.name}</h2>{document.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{document.description}</p>}{document.processing_error && <p className="mt-2 text-sm text-fail" role="status">{document.processing_error}</p>}<p className="mt-2 text-xs text-muted">{document.mime_type ?? "Metadata only"}{document.file_size !== null && ` · ${formatBytes(document.file_size)}`}{` · ${document.versions.length} ${document.versions.length === 1 ? "version" : "versions"}`}</p></div></div>
+                    <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end"><div className="text-right"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusStyles[document.status]}`}>{document.status}</span><p className="mt-1 text-xs text-muted">Updated {formatDate(document.updated_at)}</p></div>{canRetryProcessing(document) && document.has_file && <button type="button" onClick={() => void handleRetry(document)} disabled={retryingId === document.id} aria-label={`Retry processing ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-accent hover:bg-blue-50 disabled:opacity-60">{retryingId === document.id ? "Retrying…" : "Retry"}</button>}{document.has_file && <button type="button" onClick={() => void handleDownload(document)} disabled={downloadingId === document.id} aria-label={`Download ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-accent hover:bg-blue-50 disabled:opacity-60">{downloadingId === document.id ? "Downloading…" : "Download"}</button>}<button type="button" onClick={() => void handleDelete(document)} disabled={deletingId === document.id} aria-label={`Delete ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-fail hover:bg-red-50 disabled:opacity-60">{deletingId === document.id ? "Deleting…" : "Delete"}</button></div>
                   </li>
                 ))}
               </ul>}
@@ -194,4 +218,12 @@ function formatBytes(bytes: number): string {
   let unit = -1;
   do { value /= 1024; unit += 1; } while (value >= 1024 && unit < units.length - 1);
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+function canRetryProcessing(document: DocumentRecord): boolean {
+  if (document.status === "failed") return true;
+  if (document.status !== "processing") return false;
+  if (!document.processing_started_at) return true;
+  const startedAt = new Date(document.processing_started_at).getTime();
+  return Number.isFinite(startedAt) && Date.now() - startedAt > 15 * 60 * 1000;
 }
