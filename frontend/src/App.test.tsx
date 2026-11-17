@@ -35,9 +35,12 @@ describe("application routes and authentication", () => {
 
   it("protects documents and returns there after a successful login", async () => {
     window.history.replaceState({}, "", "/documents");
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ access_token: "valid-token", token_type: "bearer", user }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ access_token: "valid-token", token_type: "bearer", user }),
+      )
+      .mockResolvedValueOnce(jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 

@@ -29,3 +29,4 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    documents: Mapped[list["Document"]] = relationship(back_populates="owner")

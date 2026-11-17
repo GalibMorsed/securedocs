@@ -2,8 +2,8 @@
 
 Secure enterprise document management and AI-powered knowledge retrieval using RAG.
 
-**Current status: Authentication foundation.**
-React + FastAPI + PostgreSQL (pgvector) + Redis, with account registration, bearer-token authentication, protected workspace routes, and service diagnostics.
+**Current status: Authentication and document metadata foundation.**
+React + FastAPI + PostgreSQL (pgvector) + Redis, with account registration, organization-scoped document metadata, bearer-token authentication, protected workspace routes, and service diagnostics.
 
 ## Stack
 
@@ -37,7 +37,7 @@ In a second terminal, apply the database migration:
 docker compose exec backend alembic upgrade head
 ```
 
-This applies the pgvector extension migration and creates the initial `organizations`, `users`, and `organization_members` tables. To create a migration after changing SQLAlchemy models, run `docker compose exec backend alembic revision --autogenerate -m "describe the schema change"`, review the generated file under `backend/alembic/versions/`, then apply it with `docker compose exec backend alembic upgrade head`. Do not edit migrations that have already been applied.
+This applies the pgvector extension migration and creates the `organizations`, `users`, `organization_members`, `documents`, `document_versions`, and `document_permissions` tables. To create a migration after changing SQLAlchemy models, run `docker compose exec backend alembic revision --autogenerate -m "describe the schema change"`, review the generated file under `backend/alembic/versions/`, then apply it with `docker compose exec backend alembic upgrade head`. Do not edit migrations that have already been applied.
 
 Open http://localhost:5173. The API docs are at http://localhost:8000/docs. Stop the stack with `Ctrl+C`; run `docker compose down` to stop and remove the containers.
 
@@ -52,6 +52,18 @@ For non-development deployments, set a unique `JWT_SECRET_KEY` of at least 48 ch
 In Swagger at http://localhost:8000/docs, register or log in first, copy `access_token`, choose **Authorize**, and paste the token value to try `/auth/me` (Swagger adds the `Bearer` prefix).
 
 Frontend routes: `/` redirects to login (or the dashboard for an existing session), `/login` and `/register` are guest pages, `/dashboard` and `/documents` require a valid session, and `/status` remains available for service diagnostics.
+
+### Document metadata API
+
+All document routes require a valid bearer token and an organization membership. For this first organization-aware workflow, documents are created in the user’s registration organization; list, detail, update, and delete queries are scoped to that organization. Documents created by another organization return `404`. Owners and administrators can edit or delete any document in their organization; members can manage their own documents, and viewers have read-only access. A document metadata update creates a new `document_versions` snapshot.
+
+- `POST /api/v1/documents` accepts `name`, optional `description`, `mime_type`, and `file_size` (bytes); no file is stored yet.
+- `GET /api/v1/documents?offset=0&limit=100` lists organization documents.
+- `GET /api/v1/documents/{id}` returns metadata and version history.
+- `PATCH /api/v1/documents/{id}` updates metadata and records a new version.
+- `DELETE /api/v1/documents/{id}` deletes the record and its version/permission rows.
+
+The Documents page supports creating metadata records and deleting them. Real upload, private local storage, S3, and download URLs are not enabled yet.
 
 ### 1. Infrastructure (Postgres + pgvector, Redis)
 
