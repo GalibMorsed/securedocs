@@ -12,6 +12,10 @@ from app.services.document_extraction import (
     extract_document_text,
 )
 from app.storage import FileStorage, StorageError, StorageNotFound
+from app.core.config import settings
+from app.rag.embeddings import EmbeddingProvider, EmbeddingError, TransientEmbeddingError
+from app.rag.budget import reserve_embedding_tokens
+import redis
 
 logger = logging.getLogger(__name__)
 OCR_REQUIRED_MESSAGE = (
@@ -20,7 +24,7 @@ OCR_REQUIRED_MESSAGE = (
 STALE_PROCESSING_AFTER = timedelta(minutes=15)
 
 
-def process_document(db: Session, document_id: UUID, storage: FileStorage) -> str:
+def process_document(db: Session, document_id: UUID, storage: FileStorage, provider: EmbeddingProvider | object, budget_client: redis.Redis) -> str:
     document = db.scalar(
         select(Document)
         .where(Document.id == document_id)
@@ -39,12 +43,8 @@ def process_document(db: Session, document_id: UUID, storage: FileStorage) -> st
         .limit(1)
     )
     if document.status == "ready" and version is not None:
-        has_chunks = db.scalar(
-            select(DocumentChunk.id)
-            .where(DocumentChunk.version_id == version.id)
-            .limit(1)
-        )
-        if has_chunks is not None:
+        pending = db.scalar(select(DocumentChunk.id).where(DocumentChunk.version_id == version.id, DocumentChunk.embedding.is_(None)).limit(1))
+        if pending is None:
             return "ready"
 
     if version is None or not (version.storage_key or document.storage_key):
@@ -58,23 +58,12 @@ def process_document(db: Session, document_id: UUID, storage: FileStorage) -> st
     db.commit()
 
     storage_key = version.storage_key or document.storage_key
+    existing_chunks = list(db.scalars(select(DocumentChunk).where(DocumentChunk.version_id == version.id).order_by(DocumentChunk.chunk_index)))
     try:
-        stored = storage.open(storage_key)
-        try:
-            content = stored.stream.read()
-        finally:
-            stored.stream.close()
-        pages = extract_document_text(content, version.mime_type or document.mime_type)
-        if not any(page.text.strip() for page in pages):
-            message = (
-                OCR_REQUIRED_MESSAGE
-                if (version.mime_type or document.mime_type) == "application/pdf"
-                else "No searchable text was found in this document."
-            )
-            raise DocumentExtractionError(message)
-        chunks = chunk_pages(pages)
-        if not chunks:
-            raise DocumentExtractionError("No searchable text was found in this document.")
+        if existing_chunks:
+            chunks = None
+        else:
+            chunks = _extract_chunks(storage, storage_key, version.mime_type or document.mime_type)
     except DocumentExtractionError as exc:
         _mark_failed(db, document, str(exc))
         return "failed"
@@ -85,33 +74,90 @@ def process_document(db: Session, document_id: UUID, storage: FileStorage) -> st
     except StorageError:
         raise
 
+    if chunks is not None:
+        try:
+            db.execute(delete(DocumentChunk).where(DocumentChunk.version_id == version.id))
+            existing_chunks = [DocumentChunk(document_id=document.id, version_id=version.id, chunk_index=chunk.chunk_index, content=chunk.content, page_number=chunk.page_number, char_start=chunk.char_start, char_end=chunk.char_end, token_count=chunk.token_count) for chunk in chunks]
+            db.add_all(existing_chunks)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+    if not existing_chunks:
+        _mark_failed(db, document, "No searchable text was found in this document.")
+        return "failed"
     try:
-        db.execute(
-            delete(DocumentChunk).where(DocumentChunk.version_id == version.id)
-        )
-        db.add_all(
-            [
-                DocumentChunk(
-                    document_id=document.id,
-                    version_id=version.id,
-                    chunk_index=chunk.chunk_index,
-                    content=chunk.content,
-                    page_number=chunk.page_number,
-                    char_start=chunk.char_start,
-                    char_end=chunk.char_end,
-                    token_count=chunk.token_count,
-                )
-                for chunk in chunks
-            ]
-        )
+        if callable(provider):
+            provider = provider()
+        total_tokens = sum(chunk.token_count for chunk in existing_chunks if chunk.embedding is None or chunk.embedding_model != settings.embedding_model)
+        if total_tokens > settings.embedding_max_document_tokens:
+            raise EmbeddingError("This document exceeds the configured embedding token limit.")
+        pending_chunks = [chunk for chunk in existing_chunks if chunk.embedding is None or chunk.embedding_model != settings.embedding_model]
+        for offset in range(0, len(pending_chunks), settings.embedding_batch_size):
+            batch = pending_chunks[offset:offset + settings.embedding_batch_size]
+            reserve_embedding_tokens(budget_client, sum(chunk.token_count for chunk in batch))
+            vectors = provider.embed_batch([chunk.content for chunk in batch])
+            if len(vectors) != len(batch):
+                raise EmbeddingError("Embedding provider returned an incomplete response.")
+            for chunk, vector in zip(batch, vectors, strict=True):
+                chunk.embedding = vector
+                chunk.embedding_model = settings.embedding_model
+                chunk.embedded_at = datetime.now(timezone.utc)
+                chunk.embedding_error = None
+            db.commit()
         document.status = "ready"
         document.processing_error = None
         document.processed_at = datetime.now(timezone.utc)
         db.commit()
+    except TransientEmbeddingError as exc:
+        db.rollback()
+        document = db.get(Document, document_id)
+        if document:
+            for chunk in db.scalars(select(DocumentChunk).where(DocumentChunk.version_id == version.id, (DocumentChunk.embedding.is_(None)) | (DocumentChunk.embedding_model != settings.embedding_model))):
+                chunk.embedding_error = str(exc)[:1000]
+            db.commit()
+        raise
+    except EmbeddingError as exc:
+        db.rollback()
+        document = db.get(Document, document_id)
+        if document:
+            document.status = "failed"
+            document.processing_error = str(exc)[:1000]
+            document.processed_at = datetime.now(timezone.utc)
+            for chunk in db.scalars(select(DocumentChunk).where(DocumentChunk.version_id == version.id, (DocumentChunk.embedding.is_(None)) | (DocumentChunk.embedding_model != settings.embedding_model))):
+                chunk.embedding_error = str(exc)[:1000]
+            db.commit()
+        return "failed"
     except Exception:
         db.rollback()
         raise
     return "ready"
+
+
+def _extract_chunks(storage: FileStorage, storage_key: str, mime_type: str | None):
+    try:
+        stored = storage.open(storage_key)
+        try:
+            content = stored.stream.read()
+        finally:
+            stored.stream.close()
+        pages = extract_document_text(content, mime_type or "")
+        if not any(page.text.strip() for page in pages):
+            message = (
+                OCR_REQUIRED_MESSAGE
+                if (mime_type or "") == "application/pdf"
+                else "No searchable text was found in this document."
+            )
+            raise DocumentExtractionError(message)
+        chunks = chunk_pages(pages)
+        if not chunks:
+            raise DocumentExtractionError("No searchable text was found in this document.")
+    except (DocumentExtractionError, StorageNotFound, StorageError):
+        raise
+    except Exception as exc:
+        raise DocumentExtractionError("The document text could not be extracted.") from exc
+    return chunks
 
 
 def mark_processing_retry_pending(db: Session, document_id: UUID) -> None:

@@ -7,6 +7,7 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { StatusPage } from "./pages/StatusPage";
+import { SearchPage } from "./pages/SearchPage";
 import { ThemeProvider } from "./theme/ThemeProvider";
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
               <Route element={<AppLayout />}>
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/documents" element={<DocumentsPage />} />
+                <Route path="/search" element={<SearchPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

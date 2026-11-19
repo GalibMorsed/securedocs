@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,19 @@ class Settings(BaseSettings):
     )
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str | None = None
+
+    embedding_provider: Literal["openrouter"] = "openrouter"
+    embedding_model: Literal["qwen/qwen3-embedding-8b"] = "qwen/qwen3-embedding-8b"
+    embedding_dimensions: Literal[4096] = 4096
+    openrouter_api_key: SecretStr | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    embedding_timeout_seconds: float = 20.0
+    embedding_max_retries: int = 3
+    embedding_retry_backoff_seconds: int = 2
+    embedding_batch_size: int = 64
+    embedding_max_document_tokens: int = 100_000
+    embedding_max_query_tokens: int = 2_048
+    embedding_monthly_token_limit: int = 25_000_000
 
     storage_backend: Literal["local", "s3"] = "local"
     local_storage_path: Path = Path("private_uploads")
@@ -56,6 +69,18 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET_KEY must be at least 48 characters outside development")
         if self.upload_max_bytes < 1:
             raise ValueError("UPLOAD_MAX_BYTES must be at least 1")
+        if self.embedding_timeout_seconds <= 0:
+            raise ValueError("EMBEDDING_TIMEOUT_SECONDS must be greater than 0")
+        if self.embedding_max_retries < 0:
+            raise ValueError("EMBEDDING_MAX_RETRIES cannot be negative")
+        if self.embedding_retry_backoff_seconds < 1:
+            raise ValueError("EMBEDDING_RETRY_BACKOFF_SECONDS must be at least 1")
+        if self.embedding_batch_size < 1 or self.embedding_batch_size > 2_048:
+            raise ValueError("EMBEDDING_BATCH_SIZE must be between 1 and 2048")
+        if self.embedding_max_document_tokens < 1 or self.embedding_max_query_tokens < 1:
+            raise ValueError("Embedding token limits must be positive")
+        if self.embedding_monthly_token_limit < 1:
+            raise ValueError("EMBEDDING_MONTHLY_TOKEN_LIMIT must be at least 1")
         if self.storage_backend == "s3" and not self.s3_bucket:
             raise ValueError("S3_BUCKET is required when STORAGE_BACKEND=s3")
         return self

@@ -1,11 +1,10 @@
 from dataclasses import dataclass
-import re
+from app.rag.token_count import count_tokens
 
 from app.services.document_extraction import ExtractedPage, normalize_text
 
 DEFAULT_CHUNK_SIZE = 1200
 DEFAULT_CHUNK_OVERLAP = 200
-_TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", flags=re.UNICODE)
 
 
 @dataclass(frozen=True)
@@ -51,7 +50,7 @@ def chunk_pages(
                             page_number=page.page_number,
                             char_start=char_start,
                             char_end=char_start + len(content),
-                            token_count=len(_TOKEN_PATTERN.findall(content)),
+                            token_count=count_tokens(content),
                         )
                     )
                 if end >= len(text):

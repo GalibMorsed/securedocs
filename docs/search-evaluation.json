@@ -1,0 +1,20 @@
+[
+  {
+    "question": "What is the organization's document retention period?",
+    "expected_document": "Replace with an uploaded retention policy filename",
+    "expected_section_or_chunk": "Replace with the retention schedule section",
+    "relevant_keywords": ["retention", "records", "years", "deletion"]
+  },
+  {
+    "question": "Who is allowed to access confidential files?",
+    "expected_document": "Replace with an uploaded access control policy filename",
+    "expected_section_or_chunk": "Replace with the roles and permissions section",
+    "relevant_keywords": ["confidential", "access", "role", "permission"]
+  },
+  {
+    "question": "How should a security incident be reported?",
+    "expected_document": "Replace with an uploaded incident response document filename",
+    "expected_section_or_chunk": "Replace with the reporting procedure section",
+    "relevant_keywords": ["incident", "report", "security", "response"]
+  }
+]

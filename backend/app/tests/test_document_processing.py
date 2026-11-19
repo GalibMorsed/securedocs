@@ -12,6 +12,28 @@ from app.services.document_extraction import (
     extract_document_text,
 )
 from app.services.document_processing import process_document
+import app.services.document_processing as processing
+
+
+class FakeProvider:
+    def embed_text(self, text):
+        return [0.1] * 4096
+
+    def embed_batch(self, texts):
+        return [[0.1] * 4096 for _ in texts]
+
+
+class FakeBudget:
+    pass
+
+
+@pytest.fixture(autouse=True)
+def no_embedding_budget(monkeypatch):
+    monkeypatch.setattr(processing, "reserve_embedding_tokens", lambda *_args: None)
+
+
+def _process(db, client, document_id):
+    return process_document(db, document_id, client.app.state.test_storage, FakeProvider(), FakeBudget())
 
 TEXT_MIME = "text/plain"
 PDF_MIME = "application/pdf"
@@ -128,7 +150,7 @@ def test_worker_marks_ready_and_is_idempotent(auth_client):
     assert auth_client.app.state.test_queued_document_ids == [document_id]
 
     with auth_client.app.state.test_session() as db:
-        result = process_document(db, document_id, auth_client.app.state.test_storage)
+        result = _process(db, auth_client, document_id)
         document = db.get(Document, document_id)
         assert result == "ready"
         assert document.status == "ready"
@@ -137,7 +159,8 @@ def test_worker_marks_ready_and_is_idempotent(auth_client):
         assert document.processing_error is None
         chunks_before = db.query(DocumentChunk).filter_by(document_id=document_id).count()
         assert chunks_before > 1
-        assert process_document(db, document_id, auth_client.app.state.test_storage) == "ready"
+        assert process_document(db, document_id, auth_client.app.state.test_storage, FakeProvider(), FakeBudget()) == "ready"
+        assert all(chunk.embedding is not None for chunk in db.query(DocumentChunk).filter_by(document_id=document_id))
         assert db.query(DocumentChunk).filter_by(document_id=document_id).count() == chunks_before
 
     listed = auth_client.get("/api/v1/documents", headers={"Authorization": f"Bearer {token}"})
@@ -149,7 +172,7 @@ def test_empty_document_fails_safely_and_can_be_retried(auth_client):
     uploaded = _upload_text(auth_client, token, b" \n\t ")
     document_id = UUID(uploaded.json()["id"])
     with auth_client.app.state.test_session() as db:
-        assert process_document(db, document_id, auth_client.app.state.test_storage) == "failed"
+        assert _process(db, auth_client, document_id) == "failed"
 
     failed = auth_client.get(
         f"/api/v1/documents/{document_id}", headers={"Authorization": f"Bearer {token}"}
@@ -180,7 +203,7 @@ def test_retry_is_organization_scoped_and_rejects_ready_document(auth_client):
     )
     assert cross_org.status_code == 404
     with auth_client.app.state.test_session() as db:
-        assert process_document(db, document_id, auth_client.app.state.test_storage) == "ready"
+        assert _process(db, auth_client, document_id) == "ready"
     already_ready = auth_client.post(
         f"/api/v1/documents/{document_id}/retry",
         headers={"Authorization": f"Bearer {token}"},
@@ -212,6 +235,7 @@ def test_worker_retries_unexpected_failures_and_resets_status(auth_client, monke
         raise RetryScheduled()
 
     monkeypatch.setattr(tasks, "SessionLocal", auth_client.app.state.test_session)
+    monkeypatch.setattr(tasks, "get_embedding_provider", FakeProvider)
     monkeypatch.setattr(tasks, "process_document", transient_failure)
     monkeypatch.setattr(tasks.process_document_task, "retry", schedule_retry)
     with pytest.raises(RetryScheduled):

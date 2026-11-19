@@ -48,6 +48,11 @@ export function DocumentsPage() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!loading && window.location.hash.startsWith("#document-")) {
+      document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ block: "center" });
+    }
+  }, [loading, documents]);
 
   const hasPendingFiles = documents.some(
     (document) => document.has_file && (document.status === "uploaded" || document.status === "processing"),
@@ -195,7 +200,7 @@ export function DocumentsPage() {
             : documents.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center sm:px-12"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-xl text-accent" aria-hidden="true">▤</div><h2 className="mt-5 text-lg font-semibold">Your library is empty</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted">Upload a document to start building your organization’s private library.</p></div>
               : <ul className="overflow-hidden rounded-xl border border-line bg-white shadow-sm">
                 {documents.map((document) => (
-                  <li key={document.id} className="flex flex-col gap-4 border-b border-line p-5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                  <li id={`document-${document.id}`} key={document.id} className="flex flex-col gap-4 border-b border-line p-5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                     <div className="flex min-w-0 items-start gap-4"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-accent" aria-hidden="true">▤</div><div className="min-w-0"><h2 className="truncate font-semibold">{document.name}</h2>{document.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{document.description}</p>}{document.processing_error && <p className="mt-2 text-sm text-fail" role="status">{document.processing_error}</p>}<p className="mt-2 text-xs text-muted">{document.mime_type ?? "Metadata only"}{document.file_size !== null && ` · ${formatBytes(document.file_size)}`}{` · ${document.versions.length} ${document.versions.length === 1 ? "version" : "versions"}`}</p></div></div>
                     <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end"><div className="text-right"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusStyles[document.status]}`}>{document.status}</span><p className="mt-1 text-xs text-muted">Updated {formatDate(document.updated_at)}</p></div>{canRetryProcessing(document) && document.has_file && <button type="button" onClick={() => void handleRetry(document)} disabled={retryingId === document.id} aria-label={`Retry processing ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-accent hover:bg-blue-50 disabled:opacity-60">{retryingId === document.id ? "Retrying…" : "Retry"}</button>}{document.has_file && <button type="button" onClick={() => void handleDownload(document)} disabled={downloadingId === document.id} aria-label={`Download ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-accent hover:bg-blue-50 disabled:opacity-60">{downloadingId === document.id ? "Downloading…" : "Download"}</button>}<button type="button" onClick={() => void handleDelete(document)} disabled={deletingId === document.id} aria-label={`Delete ${document.name}`} className="rounded-md border border-line px-3 py-2 text-sm font-medium text-fail hover:bg-red-50 disabled:opacity-60">{deletingId === document.id ? "Deleting…" : "Delete"}</button></div>
                   </li>

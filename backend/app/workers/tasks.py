@@ -1,6 +1,8 @@
 import logging
 from uuid import UUID
+import redis
 
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.document_processing import (
     mark_processing_failed,
@@ -8,6 +10,7 @@ from app.services.document_processing import (
     process_document,
 )
 from app.storage import get_storage
+from app.rag.embeddings import get_embedding_provider
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -16,7 +19,7 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     name="app.workers.tasks.process_document_task",
-    max_retries=3,
+    max_retries=settings.embedding_max_retries,
     acks_late=True,
     reject_on_worker_lost=True,
 )
@@ -24,13 +27,17 @@ def process_document_task(self, document_id: str) -> str:
     parsed_id = UUID(document_id)
     try:
         with SessionLocal() as db:
-            return process_document(db, parsed_id, get_storage())
+            client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+            try:
+                return process_document(db, parsed_id, get_storage(), get_embedding_provider, client)
+            finally:
+                client.close()
     except Exception as exc:
         logger.exception("Document processing attempt failed for %s", parsed_id)
         if self.request.retries < self.max_retries:
             with SessionLocal() as db:
                 mark_processing_retry_pending(db, parsed_id)
-            raise self.retry(exc=exc, countdown=2 ** (self.request.retries + 1))
+            raise self.retry(exc=exc, countdown=settings.embedding_retry_backoff_seconds * (2 ** self.request.retries))
 
         try:
             with SessionLocal() as db:
