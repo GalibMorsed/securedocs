@@ -9,6 +9,11 @@ const SUPPORTED_FILE_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
   ".txt": "text/plain",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
 };
 
 export function validateSelectedFile(file: File): string | null {
@@ -19,7 +24,7 @@ export function validateSelectedFile(file: File): string | null {
   const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
   const expectedType = SUPPORTED_FILE_TYPES[extension];
   if (!expectedType || file.type.toLowerCase() !== expectedType) {
-    return "Choose a PDF, plain text, or DOCX file with a matching file type.";
+    return "Choose a PDF, plain text, DOCX, PNG, JPEG, or TIFF file with a matching file type.";
   }
   return null;
 }

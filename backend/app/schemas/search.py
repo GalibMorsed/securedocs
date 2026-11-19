@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 class SearchRequest(BaseModel):
     query: str = Field(min_length=2, max_length=8_000)
     top_k: int = Field(default=8, ge=1, le=20)
+    organization_id: UUID | None = None
 
     @field_validator("query")
     @classmethod

@@ -73,7 +73,7 @@ describe("DocumentsPage uploads", () => {
     const input = screen.getByLabelText("File") as HTMLInputElement;
     const file = new File(["bad"], "script.exe", { type: "application/octet-stream" });
     fireEvent.change(input, { target: { files: [file] } });
-    expect(await screen.findByRole("alert")).toHaveTextContent("Choose a PDF, plain text, or DOCX file");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose a PDF, plain text, DOCX, PNG, JPEG, or TIFF file");
     expect(screen.getByRole("button", { name: "Upload file" })).toBeDisabled();
   });
 

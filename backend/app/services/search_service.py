@@ -39,4 +39,6 @@ def search_documents(db: Session, user: User, payload: SearchRequest, provider: 
         .order_by(distance)
         .limit(payload.top_k)
     )
+    if payload.organization_id is not None:
+        statement = statement.where(OrganizationMember.organization_id == payload.organization_id)
     return [SearchResult.model_validate(row._mapping) for row in db.execute(statement)]

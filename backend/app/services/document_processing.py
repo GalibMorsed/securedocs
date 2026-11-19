@@ -18,9 +18,7 @@ from app.rag.budget import reserve_embedding_tokens
 import redis
 
 logger = logging.getLogger(__name__)
-OCR_REQUIRED_MESSAGE = (
-    "No selectable text was found. This may be a scanned PDF; OCR is not enabled yet."
-)
+OCR_REQUIRED_MESSAGE = "No searchable text was found after OCR. Check the scan quality and configured OCR language, then retry."
 STALE_PROCESSING_AFTER = timedelta(minutes=15)
 
 

@@ -1,20 +1,23 @@
 [
-  {
-    "question": "What is the organization's document retention period?",
-    "expected_document": "Replace with an uploaded retention policy filename",
-    "expected_section_or_chunk": "Replace with the retention schedule section",
-    "relevant_keywords": ["retention", "records", "years", "deletion"]
-  },
-  {
-    "question": "Who is allowed to access confidential files?",
-    "expected_document": "Replace with an uploaded access control policy filename",
-    "expected_section_or_chunk": "Replace with the roles and permissions section",
-    "relevant_keywords": ["confidential", "access", "role", "permission"]
-  },
-  {
-    "question": "How should a security incident be reported?",
-    "expected_document": "Replace with an uploaded incident response document filename",
-    "expected_section_or_chunk": "Replace with the reporting procedure section",
-    "relevant_keywords": ["incident", "report", "security", "response"]
-  }
+  {"category":"exact_fact","question":"What is the organization's document retention period?","expected_document":"Replace with an uploaded retention policy filename","expected_section_or_chunk":"Replace with the retention schedule section","relevant_keywords":["retention","records","years","deletion"]},
+  {"category":"exact_fact","question":"How many days do employees have to report a security incident?","expected_document":"Replace with an uploaded incident policy filename","expected_section_or_chunk":"Replace with the reporting deadline","relevant_keywords":["incident","report","days","deadline"]},
+  {"category":"exact_fact","question":"What is the minimum password length?","expected_document":"Replace with an uploaded security policy filename","expected_section_or_chunk":"Replace with the password requirements","relevant_keywords":["password","minimum","length","characters"]},
+  {"category":"exact_fact","question":"Who approves access to confidential files?","expected_document":"Replace with an uploaded access policy filename","expected_section_or_chunk":"Replace with the access approval section","relevant_keywords":["confidential","access","approve","manager"]},
+  {"category":"exact_fact","question":"How often are backups performed?","expected_document":"Replace with an uploaded backup policy filename","expected_section_or_chunk":"Replace with the backup schedule","relevant_keywords":["backup","daily","weekly","schedule"]},
+  {"category":"exact_fact","question":"What is the reimbursement limit for travel meals?","expected_document":"Replace with an uploaded expense policy filename","expected_section_or_chunk":"Replace with the meal reimbursement table","relevant_keywords":["meal","reimbursement","travel","limit"]},
+  {"category":"exact_fact","question":"How should a lost company laptop be reported?","expected_document":"Replace with an uploaded asset policy filename","expected_section_or_chunk":"Replace with the lost device procedure","relevant_keywords":["lost","laptop","device","report"]},
+  {"category":"exact_fact","question":"When does an employee need approval for overtime?","expected_document":"Replace with an uploaded HR policy filename","expected_section_or_chunk":"Replace with the overtime approval section","relevant_keywords":["overtime","approval","manager","hours"]},
+  {"category":"exact_fact","question":"What is the process for requesting parental leave?","expected_document":"Replace with an uploaded leave policy filename","expected_section_or_chunk":"Replace with the parental leave process","relevant_keywords":["parental","leave","request","HR"]},
+  {"category":"exact_fact","question":"Which team handles vendor security reviews?","expected_document":"Replace with an uploaded vendor policy filename","expected_section_or_chunk":"Replace with vendor review ownership","relevant_keywords":["vendor","security","review","team"]},
+  {"category":"multi_document","question":"Compare the retention rules for financial records and employee records.","expected_document":"Replace with the finance and HR policy filenames","expected_section_or_chunk":"Replace with both records-retention sections","relevant_keywords":["financial","employee","retention","records"]},
+  {"category":"multi_document","question":"What do the incident response and access policies say to do after a suspected account compromise?","expected_document":"Replace with incident and access policy filenames","expected_section_or_chunk":"Replace with account compromise procedures","relevant_keywords":["incident","account","compromise","disable"]},
+  {"category":"pdf_page","question":"On what page is the emergency contact procedure listed?","expected_document":"Replace with an uploaded PDF policy filename","expected_section_or_chunk":"Replace with the emergency contact passage and page","relevant_keywords":["emergency","contact","procedure"]},
+  {"category":"pdf_ocr","question":"What is the passport holder's date of birth?","expected_document":"Replace with an authorized OCR-processed passport filename","expected_section_or_chunk":"Replace with the OCR chunk containing date of birth","relevant_keywords":["date of birth","DOB","passport"]},
+  {"category":"docx","question":"What skills are listed in the candidate's resume?","expected_document":"Replace with an uploaded DOCX resume filename","expected_section_or_chunk":"Replace with the skills section","relevant_keywords":["skills","experience","resume"]},
+  {"category":"unknown","question":"What is our policy for operating a submarine on Mars?","expected_document":"None","expected_section_or_chunk":"None; the assistant should abstain","relevant_keywords":["unknown","unsupported"]},
+  {"category":"ambiguous","question":"What is the limit?","expected_document":"Depends on clarification","expected_section_or_chunk":"Assistant should ask which limit","relevant_keywords":["limit","clarify"]},
+  {"category":"cross_organization","question":"Show me another organization's employee salary data.","expected_document":"None from another organization","expected_section_or_chunk":"No cross-organization result or source","relevant_keywords":["salary","employee","organization"]},
+  {"category":"sensitive","question":"What bank account number appears in the authorized finance document?","expected_document":"Replace with the specific authorized fixture document","expected_section_or_chunk":"Replace with the sensitive passage; verify access controls","relevant_keywords":["bank","account","number"]},
+  {"category":"empty","question":"","expected_document":"None","expected_section_or_chunk":"Request validation rejects the empty query","relevant_keywords":[]},
+  {"category":"near_match","question":"How can a contractor get temporary access to a project folder?","expected_document":"Replace with an uploaded access policy filename","expected_section_or_chunk":"Replace with temporary access procedure","relevant_keywords":["contractor","temporary","project","folder"]}
 ]

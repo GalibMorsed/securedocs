@@ -17,9 +17,12 @@ class ValidatedFile:
 
 
 _FILE_TYPES = {
-    "application/pdf": ".pdf",
-    "text/plain": ".txt",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/pdf": {".pdf"},
+    "text/plain": {".txt"},
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {".docx"},
+    "image/png": {".png"},
+    "image/jpeg": {".jpg", ".jpeg"},
+    "image/tiff": {".tif", ".tiff"},
 }
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -38,9 +41,11 @@ def validate_file(filename: str | None, declared_type: str | None, content: byte
     mime_type = (declared_type or "").split(";", maxsplit=1)[0].strip().lower()
     extension = _FILE_TYPES.get(mime_type)
     if extension is None:
-        raise InvalidUploadedFile("Unsupported file type. Upload a PDF, TXT, or DOCX file")
-    if PurePosixPath(safe_name).suffix.lower() != extension:
+        raise InvalidUploadedFile("Unsupported file type. Upload a PDF, TXT, DOCX, PNG, JPEG, or TIFF file")
+    suffix = PurePosixPath(safe_name).suffix.lower()
+    if suffix not in extension:
         raise InvalidUploadedFile("The filename extension does not match the declared file type")
+    extension = suffix
 
     if mime_type == "application/pdf":
         if not content.startswith(b"%PDF-") or b"%%EOF" not in content[-1024:]:
@@ -52,8 +57,14 @@ def validate_file(filename: str | None, declared_type: str | None, content: byte
             content.decode("utf-8-sig")
         except UnicodeDecodeError as exc:
             raise InvalidUploadedFile("Text files must use UTF-8 encoding") from exc
-    else:
+    elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         _validate_docx(content)
+    elif mime_type == "image/png" and not content.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise InvalidUploadedFile("The file does not contain a valid PNG signature")
+    elif mime_type == "image/jpeg" and not content.startswith(b"\xff\xd8\xff"):
+        raise InvalidUploadedFile("The file does not contain a valid JPEG signature")
+    elif mime_type == "image/tiff" and content[:4] not in {b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"}:
+        raise InvalidUploadedFile("The file does not contain a valid TIFF signature")
 
     return ValidatedFile(name=safe_name, mime_type=mime_type, extension=extension)
 

@@ -23,3 +23,11 @@ def reserve_embedding_tokens(client: redis.Redis, tokens: int) -> None:
     key = f"securedocs:embedding-budget:{settings.embedding_provider}:{settings.embedding_model}:{month}"
     if not client.eval(_RESERVE_TOKENS, 1, key, tokens, limit, 40 * 24 * 60 * 60):
         raise EmbeddingBudgetExceeded("Monthly embedding token limit reached. Try again next month.")
+
+
+def reserve_chat_tokens(client: redis.Redis, tokens: int) -> None:
+    limit = settings.chat_monthly_token_limit
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    key = f"securedocs:chat-budget:openrouter:{settings.chat_model}:{month}"
+    if not client.eval(_RESERVE_TOKENS, 1, key, tokens, limit, 40 * 24 * 60 * 60):
+        raise EmbeddingBudgetExceeded("Monthly answer-generation token limit reached. Try again next month.")

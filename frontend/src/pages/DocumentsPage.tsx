@@ -151,7 +151,7 @@ export function DocumentsPage() {
 
       <section className="mt-7 rounded-xl border border-line bg-white p-5 shadow-sm sm:p-7" aria-labelledby="upload-document-heading">
         <h2 id="upload-document-heading" className="text-lg font-semibold">Upload a document</h2>
-        <p className="mt-1 text-sm text-muted">PDF, plain text, or DOCX up to {formatBytes(MAX_UPLOAD_BYTES)}.</p>
+        <p className="mt-1 text-sm text-muted">PDF, plain text, DOCX, PNG, JPEG, or TIFF up to {formatBytes(MAX_UPLOAD_BYTES)}. Scanned pages are processed with OCR.</p>
         <form onSubmit={handleUpload} className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
           <div>
             <label htmlFor="document-file" className="mb-2 block text-sm font-medium">File</label>
@@ -159,7 +159,7 @@ export function DocumentsPage() {
               ref={fileInput}
               id="document-file"
               type="file"
-              accept=".pdf,.txt,.docx,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept=".pdf,.txt,.docx,.png,.jpg,.jpeg,.tif,.tiff,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/tiff"
               disabled={uploading}
               onChange={(event) => handleFileChange(event.target.files?.[0] ?? null)}
               className="block w-full rounded-lg border border-line px-3 py-2.5 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:font-medium file:text-accent"

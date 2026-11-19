@@ -8,6 +8,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { StatusPage } from "./pages/StatusPage";
 import { SearchPage } from "./pages/SearchPage";
+import { ChatPage } from "./pages/ChatPage";
 import { ThemeProvider } from "./theme/ThemeProvider";
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/documents" element={<DocumentsPage />} />
                 <Route path="/search" element={<SearchPage />} />
+                <Route path="/chat" element={<ChatPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

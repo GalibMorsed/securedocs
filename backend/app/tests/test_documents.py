@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.security import create_access_token, hash_password
 from app.models import Document, DocumentPermission, OrganizationMember, User
 from app.services import document_service
+from app.services.file_validation import validate_file
 from app.storage import StorageError
 
 
@@ -407,3 +408,9 @@ def test_database_failure_after_storage_removes_orphaned_file(auth_client, monke
         )
 
     assert list(auth_client.app.state.test_storage.root.iterdir()) == []
+
+
+def test_png_is_accepted_as_an_ocr_image():
+    valid = validate_file("scan.png", "image/png", b"\x89PNG\r\n\x1a\ncontent")
+    assert valid.mime_type == "image/png"
+    assert valid.extension == ".png"

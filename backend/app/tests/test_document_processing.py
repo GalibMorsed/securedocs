@@ -110,6 +110,45 @@ def test_extracts_pdf_text_with_page_number():
     assert pages[0].page_number == 1
 
 
+def test_scanned_pdf_uses_ocr_and_keeps_page_number(monkeypatch):
+    import app.services.document_extraction as extraction
+
+    class OcrPage:
+        def get_images(self, full=True):
+            return [(1,)]
+
+        def get_textpage_ocr(self, **kwargs):
+            assert kwargs["dpi"] == extraction.settings.ocr_dpi
+            return object()
+
+        def get_text(self, _kind, textpage):
+            assert textpage is not None
+            return "Passport holder name and document details from OCR."
+
+    class RenderedPdf:
+        needs_pass = False
+
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def load_page(self, _index): return OcrPage()
+
+    monkeypatch.setattr(extraction.fitz, "open", lambda **_kwargs: RenderedPdf())
+    pages = extract_document_text(_pdf_with_text(""), PDF_MIME)
+    assert pages == [ExtractedPage("Passport holder name and document details from OCR.", 1)]
+
+
+def test_image_upload_text_is_ocr_extractable(monkeypatch):
+    from PIL import Image
+    import app.services.document_extraction as extraction
+
+    image = Image.new("RGB", (4, 4), "white")
+    output = BytesIO()
+    image.save(output, format="PNG")
+    monkeypatch.setattr(extraction.pytesseract, "image_to_string", lambda *_args, **_kwargs: "Scanned image document text.")
+    pages = extraction.extract_document_text(output.getvalue(), "image/png")
+    assert pages == [ExtractedPage("Scanned image document text.", 1)]
+
+
 def test_extracts_docx_paragraphs_and_tables():
     pages = extract_document_text(_docx_with_text(), DOCX_MIME)
     assert "Text from a DOCX paragraph." in pages[0].text
